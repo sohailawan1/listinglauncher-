@@ -5,7 +5,7 @@ import { rateLimit } from "@/lib/rate-limit";
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-const MODEL = process.env.OPENROUTER_MODEL ?? "deepseek/deepseek-v4-flash-0731";
+const MODEL = (process.env.OPENROUTER_MODEL?.trim() || "deepseek/deepseek-v4-flash-0731");
 const FALLBACK_MODEL = "z-ai/glm-5.2:free";
 
 type OpenRouterMessage = { role: string; content: string };
