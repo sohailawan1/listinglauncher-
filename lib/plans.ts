@@ -2,8 +2,6 @@ export const APP_NAME = "ListingLauncher";
 export const APP_DESCRIPTION =
   "AI product listings that sell. Titles, descriptions, bullet points, and SEO tags for Etsy, Amazon, Shopify, and more.";
 
-export const FREE_CREDITS_PER_MONTH = 3;
-
 export type PlanId = "free" | "pro" | "business";
 
 export type Plan = {
@@ -26,12 +24,12 @@ export const plans: Plan[] = [
     tagline: "Try it, love it, sell with it.",
     price: 0,
     priceLabel: "$0",
-    creditsLabel: `${FREE_CREDITS_PER_MONTH} listings / month`,
+    creditsLabel: "3 listings / month",
     features: [
       "3 AI listings per month",
-      "Etsy, Amazon, Shopify & eBay formats",
-      "Titles, descriptions, benefits & tags",
-      "Listing history saved on this device",
+      "1 listing audit per month",
+      "All marketplace formats (Etsy, Amazon, Shopify, eBay)",
+      "Listing library on your account",
       "Copy-to-clipboard output",
     ],
     cta: "Start for free",
@@ -42,14 +40,14 @@ export const plans: Plan[] = [
     tagline: "For sellers who list every week.",
     price: 9,
     priceLabel: "$9",
-    creditsLabel: "Unlimited listings",
+    creditsLabel: "300 listings / month",
     features: [
-      "Unlimited AI listings",
+      "300 AI listings per month",
+      "100 listing audits per month",
+      "Bulk CSV — up to 50 products at once",
       "All marketplaces & 5 writing tones",
-      "Listing Audit — score & rewrite",
-      "Bulk CSV generation (up to 50 rows)",
       "Priority generation speed",
-      "Keyword & SEO tags included",
+      "Creator marketplace access",
       "Cancel anytime",
     ],
     cta: "Go Pro",
@@ -62,12 +60,13 @@ export const plans: Plan[] = [
     tagline: "For stores with a full catalog.",
     price: 29,
     priceLabel: "$29",
-    creditsLabel: "Unlimited + bulk at scale",
+    creditsLabel: "2,000 listings / month",
     features: [
+      "2,000 AI listings per month",
+      "500 listing audits per month",
+      "Bulk CSV — up to 200 products at once",
       "Everything in Pro",
-      "Bulk CSV generation (up to 500 rows)",
-      "Multi-language translation",
-      "Brand voice training",
+      "Highest priority speed",
       "Priority support",
       "Cancel anytime",
     ],
@@ -75,3 +74,10 @@ export const plans: Plan[] = [
     badge: "Best value",
   },
 ];
+
+/** Server-enforced limits — single source of truth for /api routes. */
+export const PLAN_LIMITS: Record<PlanId, { monthly: number; daily: number; audits: number; bulkRows: number }> = {
+  free: { monthly: 3, daily: 3, audits: 1, bulkRows: 0 },
+  pro: { monthly: 300, daily: 50, audits: 100, bulkRows: 50 },
+  business: { monthly: 2000, daily: 300, audits: 500, bulkRows: 200 },
+};

@@ -8,6 +8,14 @@ import type {
   GeneratedListing,
 } from "@/lib/types";
 import { rateLimit } from "@/lib/rate-limit";
+import {
+  checkAuditUsage,
+  getSessionAccount,
+  recordError,
+  recordUsage,
+  SESSION_COOKIE,
+} from "@/lib/store";
+import { cookies } from "next/headers";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -37,8 +45,8 @@ function normalizeIssues(raw: unknown): AuditIssue[] {
       return {
         type,
         severity,
-        message: String(i.message ?? ""),
-        fix: String(i.fix ?? ""),
+        message: String(i.message ?? "").slice(0, 500),
+        fix: String(i.fix ?? "").slice(0, 500),
       };
     })
     .filter((i) => i.message);
@@ -52,7 +60,9 @@ function normalizeReport(raw: RawAudit): AuditReport | null {
 
   return {
     score,
-    grade: String(raw.grade ?? "").slice(0, 40) || (score >= 80 ? "Excellent" : score >= 60 ? "Good" : "Needs Work"),
+    grade:
+      String(raw.grade ?? "").slice(0, 40) ||
+      (score >= 80 ? "Excellent" : score >= 60 ? "Good" : "Needs Work"),
     summary: String(raw.summary ?? "").slice(0, 300),
     issues: normalizeIssues(raw.issues).slice(0, 8),
     improvedListing: improved as GeneratedListing,
@@ -74,8 +84,29 @@ export async function POST(request: Request): Promise<Response> {
     );
   }
 
+  const jar = await cookies();
+  const token = jar.get(SESSION_COOKIE)?.value;
+  const account = token ? await getSessionAccount(token) : null;
+  if (!account) {
+    return Response.json(
+      {
+        report: null,
+        error: "Please create a free account to audit listings.",
+      } satisfies AuditResponse,
+      { status: 401 }
+    );
+  }
+
+  const usage = await checkAuditUsage(account.id, account.plan);
+  if (!usage.allowed) {
+    return Response.json({ report: null, error: usage.reason } satisfies AuditResponse, {
+      status: 402,
+    });
+  }
+
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) {
+    recordError("no-api-key").catch(() => {});
     return Response.json(
       {
         report: null,
@@ -95,8 +126,8 @@ export async function POST(request: Request): Promise<Response> {
     );
   }
 
-  const title = body.title?.trim() ?? "";
-  const description = body.description?.trim() ?? "";
+  const title = body.title?.trim().slice(0, 300) ?? "";
+  const description = body.description?.trim().slice(0, 5000) ?? "";
   if (!title && !description) {
     return Response.json(
       { report: null, error: "Paste at least a title or a description to audit." } satisfies AuditResponse,
@@ -111,7 +142,7 @@ export async function POST(request: Request): Promise<Response> {
       content: buildAuditUserPrompt({
         title,
         description,
-        tags: body.tags,
+        tags: body.tags?.slice(0, 20),
         keywords: body.keywords,
         marketplace: body.marketplace ?? "other",
       }),
@@ -121,6 +152,7 @@ export async function POST(request: Request): Promise<Response> {
   const result = await generateJson<RawAudit>(apiKey, messages);
 
   if (!result) {
+    recordError("audit-failed").catch(() => {});
     return Response.json(
       {
         report: null,
@@ -132,11 +164,23 @@ export async function POST(request: Request): Promise<Response> {
 
   const report = normalizeReport(result.data);
   if (!report) {
+    recordError("audit-empty").catch(() => {});
     return Response.json(
       { report: null, error: "Could not analyze this listing. Please try again." } satisfies AuditResponse,
       { status: 502 }
     );
   }
 
-  return Response.json({ report } satisfies AuditResponse);
+  await recordUsage(account.id, 1, "audit");
+
+  return Response.json({
+    report,
+    usage: {
+      usedMonthly: usage.usedMonthly + 1,
+      limitMonthly: usage.limitMonthly,
+      plan: usage.plan,
+    },
+  } satisfies AuditResponse & {
+    usage: { usedMonthly: number; limitMonthly: number; plan: string };
+  });
 }

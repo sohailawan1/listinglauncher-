@@ -1,9 +1,10 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import type { AuditReport, Marketplace } from "@/lib/types";
 import { ListingDisplay, Spinner } from "@/components/ListingUI";
-import { isProUsage, useUsage } from "@/lib/usage";
+import { useAuth } from "@/components/AuthContext";
 
 const MARKETPLACES: { value: Marketplace | "other"; label: string }[] = [
   { value: "etsy", label: "Etsy" },
@@ -35,16 +36,39 @@ function scoreRing(score: number): string {
 }
 
 export function Auditor() {
-  const usage = useUsage();
-  const isPro = isProUsage(usage);
+  const { account, loading } = useAuth();
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [tagsText, setTagsText] = useState("");
   const [marketplace, setMarketplace] = useState<Marketplace>("etsy");
-  const [loading, setLoading] = useState(false);
+  const [loadingAudit, setLoadingAudit] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [report, setReport] = useState<AuditReport | null>(null);
+
+  // ---- sign-in wall ----
+  if (!loading && !account) {
+    return (
+      <div className="mx-auto max-w-md px-4 sm:px-6">
+        <div className="rounded-3xl border border-ink-200/80 bg-white p-8 text-center shadow-lg shadow-ink-900/5">
+          <span className="inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-brand-50 to-amber-50 text-2xl shadow-sm ring-1 ring-brand-100">
+            🔍
+          </span>
+          <h2 className="mt-5 text-xl font-bold text-ink-900">Create your free account</h2>
+          <p className="mt-2 text-sm leading-relaxed text-ink-500">
+            Your free plan includes 1 listing audit every month. Create an
+            account to start — no credit card.
+          </p>
+          <Link
+            href="/account"
+            className="mt-6 inline-flex w-full items-center justify-center rounded-full bg-gradient-to-br from-brand-500 to-brand-600 px-6 py-3.5 text-sm font-semibold text-white shadow-lg shadow-brand-500/30 transition-all hover:-translate-y-0.5"
+          >
+            Create free account
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
   async function audit() {
     if (!title.trim() && !description.trim()) {
@@ -52,7 +76,7 @@ export function Auditor() {
       return;
     }
 
-    setLoading(true);
+    setLoadingAudit(true);
     setError(null);
     setReport(null);
 
@@ -82,7 +106,7 @@ export function Auditor() {
     } catch {
       setError("Could not reach the server. Check your connection and try again.");
     } finally {
-      setLoading(false);
+      setLoadingAudit(false);
     }
   }
 
@@ -97,7 +121,7 @@ export function Auditor() {
             className={fieldClasses}
             value={marketplace}
             onChange={(e) => setMarketplace(e.target.value as Marketplace)}
-            disabled={loading}
+            disabled={loadingAudit}
           >
             {MARKETPLACES.map((m) => (
               <option key={m.value} value={m.value}>
@@ -117,7 +141,7 @@ export function Auditor() {
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder="Paste your existing listing title…"
-            disabled={loading}
+            disabled={loadingAudit}
           />
         </div>
 
@@ -131,7 +155,7 @@ export function Auditor() {
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             placeholder="Paste your existing description…"
-            disabled={loading}
+            disabled={loadingAudit}
           />
         </div>
 
@@ -145,7 +169,7 @@ export function Auditor() {
             value={tagsText}
             onChange={(e) => setTagsText(e.target.value)}
             placeholder="candle, handmade gift, lavender"
-            disabled={loading}
+            disabled={loadingAudit}
           />
         </div>
 
@@ -158,10 +182,10 @@ export function Auditor() {
         <button
           type="button"
           onClick={audit}
-          disabled={loading}
+          disabled={loadingAudit}
           className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-gradient-to-br from-brand-500 to-brand-600 px-6 py-3.5 text-sm font-semibold text-white shadow-lg shadow-brand-500/30 transition-all hover:-translate-y-0.5 hover:shadow-xl hover:shadow-brand-500/40 disabled:cursor-not-allowed disabled:opacity-70 disabled:hover:translate-y-0"
         >
-          {loading ? (
+          {loadingAudit ? (
             <>
               <Spinner className="h-4 w-4" />
               Analyzing your listing…
@@ -172,14 +196,14 @@ export function Auditor() {
         </button>
 
         <p className="text-center text-xs text-ink-400">
-          {isPro
-            ? "Pro plan — audit as many listings as you like."
-            : "Free to try · See exactly what to fix and why."}
+          {account?.plan === "free"
+            ? "Free plan: 1 audit per month."
+            : "Your plan includes monthly audits — use them anytime."}
         </p>
       </div>
 
       <div className="min-h-[480px] space-y-4">
-        {!report && !loading ? (
+        {!report && !loadingAudit ? (
           <div className="relative flex min-h-[480px] flex-col items-center justify-center gap-4 overflow-hidden rounded-3xl border border-dashed border-ink-300 bg-white/60 p-10 text-center">
             <div className="pointer-events-none absolute inset-0 bg-dots opacity-40" />
             <p className="relative text-4xl">🔍</p>
@@ -193,7 +217,7 @@ export function Auditor() {
           </div>
         ) : null}
 
-        {loading ? (
+        {loadingAudit ? (
           <div className="flex min-h-[480px] flex-col items-center justify-center gap-4 rounded-3xl border border-dashed border-ink-300 bg-white/60">
             <Spinner className="h-8 w-8 text-brand-600" />
             <p className="text-sm font-semibold text-ink-900">Scoring your listing…</p>

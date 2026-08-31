@@ -5,7 +5,9 @@ const productLinks = [
   { href: "/generate", label: "Listing Generator" },
   { href: "/audit", label: "Listing Audit" },
   { href: "/bulk", label: "Bulk Generator" },
+  { href: "/influencers", label: "Creator Marketplace" },
   { href: "/library", label: "My Library" },
+  { href: "/account", label: "My Account" },
 ];
 
 const companyLinks = [

@@ -2,6 +2,61 @@ import Link from "next/link";
 import { plans } from "@/lib/plans";
 import { CheckoutButton } from "@/components/CheckoutButton";
 
+/* ----------------------- big marketplace brand cards ---------------------- */
+
+const marketplaceCards = [
+  {
+    name: "Etsy",
+    tagline: "13 perfect tags. Every single time.",
+    detail: "Hand-poured titles under 140 characters, front-loaded with the exact keywords Etsy buyers search.",
+    color: "#F1641E",
+    gradient: "from-[#F1641E] to-[#D4531A]",
+    icon: (
+      <svg viewBox="0 0 24 24" className="h-8 w-8" fill="currentColor" aria-hidden="true">
+        <path d="M9.113 7.517v3.15h2.47c1.42 0 2.1-.94 2.1-1.58 0-.67-.66-1.57-2.06-1.57H9.113zm11.63 4.5c0 4.94-2.84 7.99-9.05 7.99H3.257a.99.99 0 01-.99-.99V4.09c0-.546.443-.99.99-.99h8.146c6.48 0 9.34 3.1 9.34 7.92zm-4.62-.17c0-2.87-2.42-4.28-4.71-4.28H7.19a.63.63 0 00-.63.63v11.35c0 .35.28.63.63.63h4.22c2.77 0 4.71-1.55 4.71-4.46 0-1.63-.85-2.83-1.9-3.3 1.15-.6 1.9-1.62 1.9-2.57z" />
+      </svg>
+    ),
+  },
+  {
+    name: "Amazon",
+    tagline: "Bullets that rank and convert.",
+    detail: "FEATURE → BENEFIT bullet points, backend search terms, and titles built for Amazon's algorithm.",
+    color: "#FF9900",
+    gradient: "from-[#232F3E] to-[#131922]",
+    icon: (
+      <svg viewBox="0 0 24 24" className="h-8 w-8" fill="currentColor" aria-hidden="true">
+        <path d="M13.96 11.7c0 .86.09 1.42-.54 1.99-.93.86-2.89 1.5-4.34 1.24-1.4-.25-2.56-1.11-2.56-2.29 0-1.66 2.1-2.04 3.66-2.04 1.25 0 3.78.16 3.78 1.1zm-1.2-3.96c-.03-1.77-.34-3.16-2.03-3.16-1.63 0-2.17 1.32-2.24 2.74-.02.33-.02 1.02 0 1.35.09 1.32.62 2.6 2.24 2.6 1.7 0 2-1.55 2.03-3.03.02-.33.02-1.17 0-1.5zm7.24 6.34c0-2.15-1.74-3.72-4.48-3.72-2.73 0-4.5 1.57-4.5 3.72 0 2.14 1.77 3.65 4.5 3.65 2.74 0 4.48-1.51 4.48-3.65zm-2.22 0c0 1.1-.8 1.9-2.26 1.9-1.46 0-2.27-.8-2.27-1.9 0-1.1.81-1.95 2.27-1.95 1.46 0 2.26.85 2.26 1.95z" />
+    </svg>
+    ),
+  },
+  {
+    name: "Shopify",
+    tagline: "Your brand voice, written for you.",
+    detail: "Story-driven descriptions that make a one-product store feel like a premium brand.",
+    color: "#96BF48",
+    gradient: "from-[#96BF48] to-[#5E8E2E]",
+    icon: (
+      <svg viewBox="0 0 24 24" className="h-8 w-8" fill="currentColor" aria-hidden="true">
+        <path d="M15.37 5.46c-.3 0-.63.05-1 .15l-1.16.3.02 1.16c0 .5-.06 1.02-.14 1.53-.1.6-.25 1.2-.47 1.77-.2.53-.44 1.04-.73 1.52-.28.46-.6.9-.95 1.3-.35.4-.73.77-1.14 1.1-.4.33-.83.62-1.28.87-.44.25-.9.46-1.37.63-.46.17-.94.3-1.42.38l-1.13.2.02 1.13c0 .4.02.8.07 1.2.05.4.13.8.24 1.18.1.38.24.75.4 1.1.16.35.36.68.6.98l.36.44.44-.36c.4-.33.83-.62 1.28-.87.44-.25.9-.46 1.37-.63.46-.17.94-.3 1.42-.38.48-.08.96-.12 1.44-.12.48 0 .96.04 1.44.12.48.08.96.21 1.42.38.47.17.93.38 1.37.63.45.25.88.54 1.28.87l.44.36.36-.44c.24-.3.44-.63.6-.98.16-.35.3-.72.4-1.1.11-.38.19-.78.24-1.18.05-.4.07-.8.07-1.2l.02-1.13-1.13-.2c-.48-.08-.96-.21-1.42-.38-.47-.17-.93-.38-1.37-.63-.45-.25-.88-.54-1.28-.87-.41-.33-.79-.7-1.14-1.1-.35-.4-.67-.84-.95-1.3-.29-.48-.53-.99-.73-1.52-.22-.57-.37-1.17-.47-1.77-.08-.51-.14-1.03-.14-1.53l.02-1.16-1.16-.3c-.37-.1-.7-.15-1-.15z" />
+      </svg>
+    ),
+  },
+  {
+    name: "eBay",
+    tagline: "80-character titles, zero wasted space.",
+    detail: "Brand + item type + key attributes — every character earns its place in eBay search.",
+    color: "#E53238",
+    gradient: "from-[#E53238] to-[#A8282C]",
+    icon: (
+      <svg viewBox="0 0 24 24" className="h-8 w-8" fill="currentColor" aria-hidden="true">
+        <path d="M6.4 9.2c-1.9 0-3.6 1.4-3.6 3.9 0 2.5 1.6 3.9 3.7 3.9 1.4 0 2.6-.7 3-1.6l-1.5-.9c-.3.5-.8.9-1.5.9-1 0-1.7-.7-1.8-1.7h4.8c.1-.3.1-.6.1-.9 0-2.2-1.3-3.6-3.2-3.6zm-1.7 3c.1-.9.7-1.6 1.7-1.6.9 0 1.6.6 1.6 1.6H4.7zm6.3-4.8v1.9c-1.5.1-2.4.9-2.4 2.6 0 1.8 1 2.8 2.6 2.8h4.6v-7.3h-4.8zm-3.9-2.6c-.7 0-1.2.5-1.2 1.2s.5 1.2 1.2 1.2 1.2-.5 1.2-1.2-.5-1.2-1.2-1.2zm14.2 6.4c0-1.4-1-2.6-2.9-2.6-1.6 0-2.8.9-3.1 2.2-.3-1.3-1.5-2.2-3-2.2-1.9 0-2.9 1.2-2.9 2.6 0 1.7 1.2 2.9 3.1 2.9 1.4 0 2.4-.6 2.8-1.5.4.9 1.4 1.5 2.8 1.5 1.9 0 3.2-1.2 3.2-2.9zm-5.6-3.5h-2.3v5.4h2.3c1.9 0 3.1-1 3.1-2.7s-1.2-2.7-3.1-2.7z" />
+      </svg>
+    ),
+  },
+];
+
+/* --------------------------------- data --------------------------------- */
+
 const features = [
   {
     icon: "⚡",
@@ -12,7 +67,7 @@ const features = [
   {
     icon: "🎯",
     title: "Marketplace-tuned",
-    body: "Etsy's 13 exact tags. Amazon's keyword-rich bullets. eBay's 80-char titles. Each format, done right.",
+    body: "Each marketplace gets its own format — Etsy's 13 tags, Amazon's bullet style, eBay's 80-char titles.",
     span: "sm:col-span-1",
   },
   {
@@ -25,13 +80,19 @@ const features = [
   {
     icon: "📚",
     title: "Your listing library",
-    body: "Every listing saved and searchable. Never lose a good description again.",
+    body: "Every listing saved to your account — searchable, reusable, never lost.",
     span: "sm:col-span-1",
   },
   {
     icon: "📊",
     title: "Bulk CSV mode",
     body: "Upload your whole catalog. Get optimized listings for every product — exported as CSV.",
+    span: "sm:col-span-1",
+  },
+  {
+    icon: "🌟",
+    title: "Creator promotions",
+    body: "Book niche TikTok, Instagram & YouTube creators to promote your listing. You approve, they post, you sell.",
     span: "sm:col-span-1",
   },
   {
@@ -80,8 +141,12 @@ const faqs = [
     a: "Paste a listing you already have and get a 0–100 quality score, a list of specific issues holding it back, and a rewritten, optimized version ready to paste. It's like having a listing expert on call.",
   },
   {
+    q: "How does the creator marketplace work?",
+    a: "After generating a listing, request a promotion. Niche TikTok, Instagram, and YouTube creators whose audiences buy handmade and e-commerce products can pick it up. You set the budget, you approve the creator, and you keep 100% of the sales — ListingLauncher takes no cut.",
+  },
+  {
     q: "Is the free plan really free?",
-    a: "Yes. You get 3 AI listings every month with no credit card. Upgrade only if you want unlimited listings, audits, and bulk mode.",
+    a: "Yes. You get 3 AI listings and 1 audit every month with no credit card. Upgrade only if you want more volume, bulk mode, and higher caps.",
   },
   {
     q: "Can I cancel anytime?",
@@ -114,14 +179,14 @@ export default function Home() {
           <div className="absolute inset-0 bg-grid opacity-[0.35] [mask-image:radial-gradient(ellipse_at_center,black_20%,transparent_70%)]" />
         </div>
 
-        <div className="mx-auto max-w-6xl px-4 pb-16 pt-20 text-center sm:px-6 sm:pt-28">
+        <div className="mx-auto max-w-6xl px-4 pb-16 pt-20 text-center sm:px-6 sm:pt-24">
           <div className="animate-fade-up">
             <span className="inline-flex items-center gap-2 rounded-full border border-brand-200 bg-white/70 px-4 py-1.5 text-xs font-semibold text-brand-700 shadow-sm backdrop-blur">
               <span className="relative flex h-2 w-2">
                 <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-brand-400 opacity-75" />
                 <span className="relative inline-flex h-2 w-2 rounded-full bg-brand-500" />
               </span>
-              Now with Listing Audit — score any listing in seconds
+              Now with Listing Audit + Creator Promotions
             </span>
           </div>
 
@@ -189,31 +254,46 @@ export default function Home() {
           <p className="mt-5 animate-fade-up text-xs text-ink-400" style={{ animationDelay: "0.4s" }}>
             Free forever plan · No credit card · 3 listings every month
           </p>
-
-          {/* Stats */}
-          <div
-            className="mx-auto mt-16 grid max-w-2xl animate-fade-up grid-cols-2 gap-6 sm:grid-cols-4"
-            style={{ animationDelay: "0.5s" }}
-          >
-            {stats.map((s) => (
-              <div key={s.label}>
-                <p className="text-3xl font-bold tracking-tight text-ink-900">{s.value}</p>
-                <p className="mt-1 text-xs font-medium text-ink-500">{s.label}</p>
-              </div>
-            ))}
-          </div>
         </div>
       </section>
 
-      {/* ================= MARKETPLACES STRIP ================= */}
-      <section className="border-y border-ink-200/70 bg-white/60 py-6 backdrop-blur">
-        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-center gap-x-10 gap-y-3 px-4 text-sm font-semibold tracking-wide text-ink-400 sm:px-6">
-          <span className="text-xs font-medium uppercase tracking-widest">Built for</span>
-          {["Etsy", "Amazon", "Shopify", "eBay"].map((m) => (
-            <span key={m} className="transition-colors hover:text-ink-700">
-              {m}
-            </span>
-          ))}
+      {/* ============ BIG MARKETPLACE BRAND CARDS (top, premium) ============ */}
+      <section className="border-y border-ink-200/70 bg-white py-14 sm:py-16">
+        <div className="mx-auto max-w-6xl px-4 sm:px-6">
+          <p className="text-center text-xs font-semibold uppercase tracking-widest text-ink-400">
+            One tool · Built for every marketplace · Tuned to each algorithm
+          </p>
+          <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {marketplaceCards.map((m) => (
+              <Link
+                key={m.name}
+                href="/generate"
+                className="group relative overflow-hidden rounded-3xl border border-ink-200/80 bg-white p-6 shadow-sm transition-all duration-300 hover:-translate-y-1.5 hover:shadow-xl hover:shadow-ink-900/10"
+              >
+                <div
+                  className="pointer-events-none absolute -right-10 -top-10 h-32 w-32 rounded-full opacity-[0.07] transition-all duration-500 group-hover:scale-150 group-hover:opacity-[0.12]"
+                  style={{ backgroundColor: m.color }}
+                />
+                <span
+                  className={`relative inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br ${m.gradient} text-white shadow-lg`}
+                  style={{ boxShadow: `0 8px 20px -6px ${m.color}66` }}
+                >
+                  {m.icon}
+                </span>
+                <h3 className="relative mt-4 text-lg font-bold text-ink-900">{m.name}</h3>
+                <p className="relative mt-1 text-sm font-semibold" style={{ color: m.color }}>
+                  {m.tagline}
+                </p>
+                <p className="relative mt-2 text-xs leading-relaxed text-ink-500">{m.detail}</p>
+                <span className="relative mt-4 inline-flex items-center gap-1 text-xs font-semibold text-ink-400 transition-colors group-hover:text-ink-700">
+                  Write a {m.name} listing
+                  <svg className="h-3.5 w-3.5 transition-transform group-hover:translate-x-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M13 7l5 5-5 5" />
+                  </svg>
+                </span>
+              </Link>
+            ))}
+          </div>
         </div>
       </section>
 
@@ -344,8 +424,102 @@ export default function Home() {
         </div>
       </section>
 
+      {/* ================= CREATOR MARKETPLACE ================= */}
+      <section className="relative overflow-hidden py-20 sm:py-28">
+        <div className="pointer-events-none absolute inset-0 -z-10">
+          <div className="absolute right-0 top-0 h-80 w-80 rounded-full bg-purple-200/30 blur-3xl" />
+        </div>
+        <div className="mx-auto max-w-6xl px-4 sm:px-6">
+          <div className="grid items-center gap-10 lg:grid-cols-2">
+            <div>
+              <span className="inline-flex items-center gap-2 rounded-full border border-purple-200 bg-purple-50 px-3.5 py-1 text-xs font-semibold text-purple-700">
+                New — Creator Marketplace
+              </span>
+              <h2 className="mt-4 text-balance text-3xl font-bold tracking-tight text-ink-900 sm:text-4xl">
+                Your listing, promoted by creators whose audiences buy
+              </h2>
+              <p className="mt-4 leading-relaxed text-ink-600">
+                A great listing is step one. Step two: put it in front of buyers.
+                Book niche TikTok, Instagram, and YouTube creators to showcase your
+                product — you approve every creator, you set the budget, and you
+                keep 100% of every sale.
+              </p>
+              <ul className="mt-6 space-y-3">
+                {[
+                  "Niche audiences: handmade, home decor, gadgets, gifts",
+                  "Pay per post — starting at $5, no agency fees",
+                  "You approve the creator before they post",
+                  "ListingLauncher takes 0% of your deal",
+                ].map((point) => (
+                  <li key={point} className="flex items-start gap-2.5 text-sm text-ink-700">
+                    <span className="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full bg-purple-50 text-purple-600 ring-1 ring-purple-200">
+                      <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                      </svg>
+                    </span>
+                    {point}
+                  </li>
+                ))}
+              </ul>
+              <Link
+                href="/influencers"
+                className="mt-8 inline-flex items-center gap-2 rounded-full bg-ink-900 px-6 py-3 text-sm font-semibold text-white transition-all hover:-translate-y-0.5 hover:bg-ink-700"
+              >
+                Explore creators
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M13 7l5 5-5 5" />
+                </svg>
+              </Link>
+            </div>
+
+            <div className="grid gap-4">
+              {[
+                {
+                  name: "Handmade with Holly",
+                  platform: "TikTok · 84K",
+                  line: "“Etsy sellers — this candle listing wrote itself in 10 seconds.”",
+                  accent: "from-ink-900 to-ink-700",
+                  initial: "H",
+                },
+                {
+                  name: "The Seller Desk",
+                  platform: "YouTube · 31K",
+                  line: "“Audit scored my listing 41/100. The rewrite doubled my clicks.”",
+                  accent: "from-red-500 to-red-700",
+                  initial: "S",
+                },
+                {
+                  name: "Cozy Cottage Interiors",
+                  platform: "Instagram · 120K",
+                  line: "“My audience asks where I find these products. Now I feature yours.”",
+                  accent: "from-purple-500 to-purple-700",
+                  initial: "C",
+                },
+              ].map((inf) => (
+                <div
+                  key={inf.name}
+                  className="flex items-center gap-4 rounded-3xl border border-ink-200/80 bg-white p-5 shadow-sm transition-all hover:-translate-y-1 hover:shadow-lg"
+                >
+                  <span
+                    className={`grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-gradient-to-br ${inf.accent} text-lg font-bold text-white`}
+                  >
+                    {inf.initial}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-ink-900">
+                      {inf.name} <span className="font-normal text-ink-400">· {inf.platform}</span>
+                    </p>
+                    <p className="mt-0.5 text-sm text-ink-600">{inf.line}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </section>
+
       {/* ================= HOW IT WORKS ================= */}
-      <section id="how-it-works" className="scroll-mt-20 py-20 sm:py-28">
+      <section id="how-it-works" className="scroll-mt-20 border-y border-ink-200/70 bg-gradient-to-b from-ink-100/60 to-ink-50 py-20 sm:py-28">
         <div className="mx-auto max-w-6xl px-4 sm:px-6">
           <div className="mx-auto max-w-2xl text-center">
             <p className="text-xs font-semibold uppercase tracking-wider text-brand-600">
@@ -358,14 +532,11 @@ export default function Home() {
 
           <div className="relative mt-16 grid gap-6 md:grid-cols-3">
             <div className="pointer-events-none absolute left-0 right-0 top-10 hidden h-px bg-gradient-to-r from-transparent via-brand-300 to-transparent md:block" />
-            {steps.map((s, i) => (
+            {steps.map((s) => (
               <div key={s.step} className="relative">
                 <div className="flex items-center gap-4 md:flex-col md:items-start">
                   <span className="relative z-10 inline-flex h-20 w-20 shrink-0 items-center justify-center rounded-3xl bg-gradient-to-br from-brand-500 to-brand-600 text-2xl font-bold text-white shadow-lg shadow-brand-500/30">
                     {s.step}
-                    {i < 2 ? (
-                      <span className="absolute -right-2 top-1/2 hidden h-2 w-2 -translate-y-1/2 rotate-45 bg-brand-400 md:hidden" />
-                    ) : null}
                   </span>
                   <div className="md:mt-6">
                     <h3 className="text-lg font-semibold text-ink-900">{s.title}</h3>
@@ -381,7 +552,7 @@ export default function Home() {
       {/* ================= PRICING ================= */}
       <section
         id="pricing"
-        className="scroll-mt-20 relative overflow-hidden border-y border-ink-200/70 bg-gradient-to-b from-ink-100/70 to-ink-50 py-20 sm:py-28"
+        className="scroll-mt-20 relative overflow-hidden py-20 sm:py-28"
       >
         <div className="pointer-events-none absolute inset-0 -z-10">
           <div className="absolute left-1/2 top-0 h-72 w-[600px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-brand-200/30 blur-3xl" />
@@ -462,7 +633,7 @@ export default function Home() {
       </section>
 
       {/* ================= FAQ ================= */}
-      <section id="faq" className="scroll-mt-20 py-20 sm:py-28">
+      <section id="faq" className="scroll-mt-20 border-t border-ink-200/70 py-20 sm:py-28">
         <div className="mx-auto max-w-3xl px-4 sm:px-6">
           <div className="text-center">
             <p className="text-xs font-semibold uppercase tracking-wider text-brand-600">FAQ</p>
@@ -519,6 +690,15 @@ export default function Home() {
             >
               Score my current listing
             </Link>
+          </div>
+
+          <div className="mx-auto mt-16 grid max-w-2xl grid-cols-2 gap-6 sm:grid-cols-4">
+            {stats.map((s) => (
+              <div key={s.label}>
+                <p className="text-3xl font-bold tracking-tight text-white">{s.value}</p>
+                <p className="mt-1 text-xs font-medium text-ink-400">{s.label}</p>
+              </div>
+            ))}
           </div>
         </div>
       </section>

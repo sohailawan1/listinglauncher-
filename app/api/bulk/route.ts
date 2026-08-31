@@ -1,13 +1,26 @@
-import { buildSystemPrompt, buildUserPrompt } from "@/lib/prompt";
-import { callModel, extractContent, extractJson, normalizeListing, PRIMARY_MODEL, FALLBACK_MODEL } from "@/lib/ai";
-import { DEFAULT_LISTING_INPUT } from "@/lib/prompt";
+import { buildSystemPrompt, buildUserPrompt, DEFAULT_LISTING_INPUT } from "@/lib/prompt";
+import {
+  callModel,
+  extractContent,
+  extractJson,
+  normalizeListing,
+  PRIMARY_MODEL,
+  FALLBACK_MODEL,
+} from "@/lib/ai";
 import type { BulkResponse, GeneratedListing, ListingInput, Marketplace, Tone } from "@/lib/types";
 import { rateLimit } from "@/lib/rate-limit";
+import {
+  checkUsage,
+  getSessionAccount,
+  planLimits,
+  recordError,
+  recordUsage,
+  SESSION_COOKIE,
+} from "@/lib/store";
+import { cookies } from "next/headers";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
-
-const MAX_ROWS = 50;
 
 type RawParsed = Parameters<typeof normalizeListing>[0];
 
@@ -45,7 +58,6 @@ async function generateOne(
     return null;
   };
 
-  // One retry — transient upstream hiccups are common with batch jobs.
   return (await attempt()) ?? (await attempt());
 }
 
@@ -65,15 +77,29 @@ export async function POST(request: Request): Promise<Response> {
     );
   }
 
-  const apiKey = process.env.OPENROUTER_API_KEY;
-  if (!apiKey) {
+  const jar = await cookies();
+  const token = jar.get(SESSION_COOKIE)?.value;
+  const account = token ? await getSessionAccount(token) : null;
+  if (!account) {
     return Response.json(
       {
         listings: [],
         failed: [],
-        error: "OpenRouter API key is not configured. Add OPENROUTER_API_KEY to your environment.",
+        error: "Please create a free account first, then upgrade to Pro for bulk generation.",
       } satisfies BulkResponse,
-      { status: 503 }
+      { status: 401 }
+    );
+  }
+
+  const limits = planLimits(account.plan);
+  if (limits.bulkMaxRows === 0) {
+    return Response.json(
+      {
+        listings: [],
+        failed: [],
+        error: "Bulk generation is a Pro feature. Upgrade to process your whole catalog.",
+      } satisfies BulkResponse,
+      { status: 402 }
     );
   }
 
@@ -92,9 +118,12 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   const rows = (body.rows ?? [])
-    .map((r) => ({ productName: (r.productName ?? "").trim(), details: (r.details ?? "").trim() }))
+    .map((r) => ({
+      productName: (r.productName ?? "").trim().slice(0, 300),
+      details: (r.details ?? "").trim().slice(0, 2000),
+    }))
     .filter((r) => r.productName)
-    .slice(0, MAX_ROWS);
+    .slice(0, limits.bulkMaxRows);
 
   if (rows.length === 0) {
     return Response.json(
@@ -103,13 +132,33 @@ export async function POST(request: Request): Promise<Response> {
     );
   }
 
+  const usage = await checkUsage(account.id, account.plan, rows.length);
+  if (!usage.allowed) {
+    return Response.json(
+      { listings: [], failed: [], error: usage.reason } satisfies BulkResponse,
+      { status: 402 }
+    );
+  }
+
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) {
+    recordError("no-api-key").catch(() => {});
+    return Response.json(
+      {
+        listings: [],
+        failed: [],
+        error: "OpenRouter API key is not configured. Add OPENROUTER_API_KEY to your environment.",
+      } satisfies BulkResponse,
+      { status: 503 }
+    );
+  }
+
   const marketplace = (body.marketplace as Marketplace) || "etsy";
   const tone = (body.tone as Tone) || "friendly";
 
-  // Process in small batches so we don't blow past OpenRouter's rate limits.
   const listings: GeneratedListing[] = [];
   const failed: { productName: string; error: string }[] = [];
-  const BATCH = 3;
+  const BATCH = 5;
 
   for (let i = 0; i < rows.length; i += BATCH) {
     const batch = rows.slice(i, i + BATCH);
@@ -130,5 +179,22 @@ export async function POST(request: Request): Promise<Response> {
     }
   }
 
-  return Response.json({ listings, failed } satisfies BulkResponse);
+  if (listings.length > 0) {
+    await recordUsage(account.id, listings.length, "listing");
+  }
+  if (failed.length > 0) {
+    await recordError("bulk-partial-failure").catch(() => {});
+  }
+
+  return Response.json({
+    listings,
+    failed,
+    usage: {
+      usedMonthly: usage.usedMonthly + listings.length,
+      limitMonthly: usage.limitMonthly,
+      plan: usage.plan,
+    },
+  } satisfies BulkResponse & {
+    usage: { usedMonthly: number; limitMonthly: number; plan: string };
+  });
 }

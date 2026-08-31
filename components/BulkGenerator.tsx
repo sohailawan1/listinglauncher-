@@ -1,11 +1,11 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import type { GeneratedListing, Marketplace, Tone } from "@/lib/types";
 import { formatBulkCsv } from "@/lib/library";
 import { Spinner } from "@/components/ListingUI";
-import { isProUsage, useUsage } from "@/lib/usage";
+import { useAuth } from "@/components/AuthContext";
 
 const fieldClasses =
   "w-full rounded-xl border border-ink-200 bg-white px-4 py-3 text-sm text-ink-900 shadow-sm transition-all focus:border-brand-500 focus:outline-none focus:ring-4 focus:ring-brand-500/15";
@@ -25,6 +25,11 @@ const TONES: { value: Tone; label: string }[] = [
   { value: "minimal", label: "Minimal" },
   { value: "urgent", label: "Urgent" },
 ];
+
+const PLAN_ROW_CAPS: Record<string, number> = { free: 0, pro: 50, business: 200 };
+
+/** Rows sent per API request — keeps every request well under serverless timeouts. */
+const CHUNK_SIZE = 10;
 
 type Row = { productName: string; details: string };
 
@@ -71,18 +76,20 @@ function parseCsv(text: string): Row[] {
 }
 
 export function BulkGenerator() {
-  const usage = useUsage();
-  const isPro = isProUsage(usage);
+  const { account, loading } = useAuth();
 
-  const fileRef = useRef<HTMLInputElement>(null);
   const [rows, setRows] = useState<Row[]>([]);
   const [marketplace, setMarketplace] = useState<Marketplace>("etsy");
   const [tone, setTone] = useState<Tone>("friendly");
-  const [loading, setLoading] = useState(false);
+  const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [done, setDone] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [listings, setListings] = useState<GeneratedListing[]>([]);
   const [failedRows, setFailedRows] = useState<{ productName: string; error: string }[]>([]);
+
+  const plan = account?.plan ?? "free";
+  const rowCap = PLAN_ROW_CAPS[plan] ?? 0;
 
   function onFile(e: React.ChangeEvent<HTMLInputElement>) {
     setError(null);
@@ -96,7 +103,12 @@ export function BulkGenerator() {
         setRows([]);
         return;
       }
-      setRows(parsed.slice(0, 50));
+      if (parsed.length > rowCap && rowCap > 0) {
+        setRows(parsed.slice(0, rowCap));
+        setError(`Your plan processes up to ${rowCap} rows at once — we loaded your first ${rowCap}.`);
+        return;
+      }
+      setRows(parsed.slice(0, Math.max(rowCap, 200)));
     };
     reader.readAsText(file);
   }
@@ -107,40 +119,47 @@ export function BulkGenerator() {
       return;
     }
 
-    setLoading(true);
+    setRunning(true);
     setError(null);
     setListings([]);
     setFailedRows([]);
-    setProgress(10);
+    setProgress(0);
+    setDone(0);
 
-    const timer = setInterval(() => {
-      setProgress((p) => Math.min(90, p + Math.ceil(80 / rows.length)));
-    }, 1500);
+    const allListings: GeneratedListing[] = [];
+    const allFailed: { productName: string; error: string }[] = [];
 
-    try {
-      const res = await fetch("/api/bulk", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rows, marketplace, tone }),
-      });
-      const data = (await res.json()) as {
-        listings?: GeneratedListing[];
-        failed?: { productName: string; error: string }[];
-        error?: string;
-      };
-      if (!res.ok) {
-        setError(data.error ?? "Bulk generation failed. Please try again.");
-        return;
+    // Chunked: each request handles CHUNK_SIZE rows — no serverless timeouts,
+    // real progress updates, and a partial network failure never loses work.
+    for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
+      const chunk = rows.slice(i, i + CHUNK_SIZE);
+      try {
+        const res = await fetch("/api/bulk", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ rows: chunk, marketplace, tone }),
+        });
+        const data = (await res.json()) as {
+          listings?: GeneratedListing[];
+          failed?: { productName: string; error: string }[];
+          error?: string;
+        };
+        if (!res.ok) {
+          setError(data.error ?? "Bulk generation failed. Please try again.");
+          break;
+        }
+        allListings.push(...(data.listings ?? []));
+        allFailed.push(...(data.failed ?? []));
+      } catch {
+        allFailed.push(...chunk.map((r) => ({ productName: r.productName, error: "Network error" })));
       }
-      setListings(data.listings ?? []);
-      setFailedRows(data.failed ?? []);
-      setProgress(100);
-    } catch {
-      setError("Could not reach the server. Check your connection and try again.");
-    } finally {
-      clearInterval(timer);
-      setLoading(false);
+      setDone(Math.min(i + CHUNK_SIZE, rows.length));
+      setProgress(Math.round(((i + CHUNK_SIZE) / rows.length) * 100));
     }
+
+    setListings(allListings);
+    setFailedRows(allFailed);
+    setRunning(false);
   }
 
   function downloadCsv() {
@@ -154,41 +173,73 @@ export function BulkGenerator() {
     URL.revokeObjectURL(url);
   }
 
-  return (
-    <div className="mx-auto w-full max-w-4xl px-4 sm:px-6">
-      {!isPro ? (
-        <div className="mb-6 flex flex-col items-start justify-between gap-3 rounded-2xl border border-purple-200 bg-gradient-to-r from-purple-50 to-brand-50 p-5 sm:flex-row sm:items-center">
-          <p className="text-sm text-purple-800">
-            <span className="font-semibold">Bulk generation is a Pro feature.</span>{" "}
-            You can preview it with up to 3 products right now.
+  // ---- sign-in / plan wall ----
+  if (!loading && !account) {
+    return (
+      <div className="mx-auto max-w-md px-4 sm:px-6">
+        <div className="rounded-3xl border border-ink-200/80 bg-white p-8 text-center shadow-lg shadow-ink-900/5">
+          <span className="inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-brand-50 to-amber-50 text-2xl shadow-sm ring-1 ring-brand-100">
+            📊
+          </span>
+          <h2 className="mt-5 text-xl font-bold text-ink-900">Bulk needs an account</h2>
+          <p className="mt-2 text-sm leading-relaxed text-ink-500">
+            Create a free account to get started. Bulk CSV generation is
+            included in Pro (50 rows) and Business (200 rows).
+          </p>
+          <Link
+            href="/account"
+            className="mt-6 inline-flex w-full items-center justify-center rounded-full bg-gradient-to-br from-brand-500 to-brand-600 px-6 py-3.5 text-sm font-semibold text-white shadow-lg shadow-brand-500/30 transition-all hover:-translate-y-0.5"
+          >
+            Create free account
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  if (rowCap === 0) {
+    return (
+      <div className="mx-auto max-w-2xl px-4 sm:px-6">
+        <div className="rounded-3xl border border-purple-200 bg-gradient-to-r from-purple-50 to-brand-50 p-8 text-center shadow-lg shadow-ink-900/5">
+          <span className="inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-white text-2xl shadow-sm ring-1 ring-purple-100">
+            📊
+          </span>
+          <h2 className="mt-5 text-xl font-bold text-ink-900">Bulk is a Pro feature</h2>
+          <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-ink-600">
+            Upgrade to Pro to upload your catalog CSV and get optimized listings
+            for every product — 50 rows at once. Business handles 200 rows.
           </p>
           <Link
             href="/#pricing"
-            className="shrink-0 rounded-full bg-purple-700 px-4 py-2 text-xs font-semibold text-white transition-all hover:-translate-y-0.5 hover:bg-purple-800"
+            className="mt-6 inline-flex rounded-full bg-purple-700 px-6 py-3 text-sm font-semibold text-white transition-all hover:-translate-y-0.5 hover:bg-purple-800"
           >
-            Go Pro
+            See plans
           </Link>
         </div>
-      ) : null}
+      </div>
+    );
+  }
 
+  return (
+    <div className="mx-auto w-full max-w-4xl px-4 sm:px-6">
       <div className="space-y-5 rounded-3xl border border-ink-200/80 bg-white p-6 shadow-lg shadow-ink-900/5 sm:p-8">
         <div>
           <h2 className="text-lg font-semibold text-ink-900">1. Upload your products</h2>
           <p className="mt-1 text-sm text-ink-500">
             A CSV with columns <code className="rounded bg-ink-100 px-1.5 py-0.5 text-xs">product_name</code> and
             optionally <code className="rounded bg-ink-100 px-1.5 py-0.5 text-xs">details</code>. One product per row.
+            Your {plan === "business" ? "Business" : "Pro"} plan processes up to{" "}
+            <strong>{rowCap} rows</strong> at once.
           </p>
-          <label
-            className="mt-4 flex cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-ink-300 bg-ink-50/50 px-6 py-10 text-center transition-all hover:border-brand-400 hover:bg-brand-50/40"
-          >
+          <label className="mt-4 flex cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-ink-300 bg-ink-50/50 px-6 py-10 text-center transition-all hover:border-brand-400 hover:bg-brand-50/40">
             <svg className="h-8 w-8 text-brand-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M7 16a4 4 0 01-.88-7.9A5 5 0 1115.9 6H16a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
             </svg>
             <span className="text-sm font-semibold text-ink-800">
               {rows.length ? `${rows.length} products loaded` : "Click to choose a CSV file"}
             </span>
-            <span className="text-xs text-ink-400">or drag &amp; drop · max 50 rows on this plan</span>
-            <input ref={fileRef} type="file" accept=".csv,text/csv" onChange={onFile} className="hidden" />
+            <span className="text-xs text-ink-400">max {rowCap} rows on your plan</span>
+            <input type="file" accept=".csv,text/csv" onChange={onFile} className="hidden" />
           </label>
         </div>
 
@@ -202,7 +253,7 @@ export function BulkGenerator() {
               className={fieldClasses}
               value={marketplace}
               onChange={(e) => setMarketplace(e.target.value as Marketplace)}
-              disabled={loading}
+              disabled={running}
             >
               {MARKETPLACES.map((m) => (
                 <option key={m.value} value={m.value}>
@@ -220,7 +271,7 @@ export function BulkGenerator() {
               className={fieldClasses}
               value={tone}
               onChange={(e) => setTone(e.target.value as Tone)}
-              disabled={loading}
+              disabled={running}
             >
               {TONES.map((t) => (
                 <option key={t.value} value={t.value}>
@@ -254,25 +305,32 @@ export function BulkGenerator() {
         <button
           type="button"
           onClick={run}
-          disabled={loading || !rows.length}
+          disabled={running || !rows.length}
           className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-gradient-to-br from-brand-500 to-brand-600 px-6 py-3.5 text-sm font-semibold text-white shadow-lg shadow-brand-500/30 transition-all hover:-translate-y-0.5 hover:shadow-xl hover:shadow-brand-500/40 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0"
         >
-          {loading ? (
+          {running ? (
             <>
               <Spinner className="h-4 w-4" />
-              Generating {rows.length} listings…
+              {done}/{rows.length} done…
             </>
           ) : (
             `Generate ${rows.length || ""} listings`
           )}
         </button>
 
-        {loading ? (
-          <div className="h-2 overflow-hidden rounded-full bg-ink-100">
-            <div
-              className="h-full rounded-full bg-gradient-to-r from-brand-400 to-brand-600 transition-all duration-500"
-              style={{ width: `${progress}%` }}
-            />
+        {running || progress === 100 ? (
+          <div>
+            <div className="h-2 overflow-hidden rounded-full bg-ink-100">
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-brand-400 to-brand-600 transition-all duration-500"
+                style={{ width: `${progress}%` }}
+              />
+            </div>
+            {running ? (
+              <p className="mt-1.5 text-center text-xs text-ink-400">
+                Processed {done} of {rows.length} products
+              </p>
+            ) : null}
           </div>
         ) : null}
       </div>
@@ -282,7 +340,9 @@ export function BulkGenerator() {
           <div className="flex items-center justify-between gap-4">
             <p className="text-sm font-semibold text-ink-900">
               ✅ {listings.length} listing{listings.length === 1 ? "" : "s"} ready
-              {failedRows.length ? <span className="font-normal text-red-500"> · {failedRows.length} failed</span> : null}
+              {failedRows.length ? (
+                <span className="font-normal text-red-500"> · {failedRows.length} failed</span>
+              ) : null}
             </p>
             <button
               type="button"

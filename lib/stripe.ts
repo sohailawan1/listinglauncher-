@@ -25,6 +25,8 @@ const PRICE_ENV_BY_PLAN: Record<string, string | undefined> = {
 export async function createCheckoutSession(args: {
   plan: string;
   origin: string;
+  email?: string;
+  accountId?: string;
 }): Promise<{ url: string } | null> {
   const stripe = getStripe();
   if (!stripe) return null;
@@ -37,8 +39,13 @@ export async function createCheckoutSession(args: {
     line_items: [{ price: priceId, quantity: 1 }],
     success_url: `${args.origin}/generate?upgraded=1`,
     cancel_url: `${args.origin}/#pricing`,
+    ...(args.email ? { customer_email: args.email } : {}),
     subscription_data: {
-      metadata: { app: "listinglauncher", plan: args.plan },
+      metadata: {
+        app: "listinglauncher",
+        plan: args.plan,
+        ...(args.accountId ? { accountId: args.accountId } : {}),
+      },
     },
   });
 

@@ -4,9 +4,9 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import type { GeneratedListing, ListingInput, Marketplace, Tone } from "@/lib/types";
 import { DEFAULT_LISTING_INPUT } from "@/lib/prompt";
-import { isProUsage, recordGeneration, remainingCredits, setProPlan, useUsage } from "@/lib/usage";
 import { addToLibrary } from "@/lib/library";
 import { ListingDisplay, Spinner } from "@/components/ListingUI";
+import { useAuth } from "@/components/AuthContext";
 
 const MARKETPLACES: { value: Marketplace; label: string; hint: string }[] = [
   { value: "etsy", label: "Etsy", hint: "13 tags · 140-char titles" },
@@ -29,20 +29,19 @@ const fieldClasses =
 
 const labelClasses = "mb-1.5 block text-sm font-medium text-ink-700";
 
-export function Generator() {
-  const usage = useUsage();
-  const isPro = isProUsage(usage);
-  const creditsLeft = remainingCredits(usage);
+type Usage = { usedMonthly: number; limitMonthly: number; plan: string };
 
+export function Generator() {
+  const { account, loading } = useAuth();
   const [input, setInput] = useState<ListingInput>(DEFAULT_LISTING_INPUT);
-  const [loading, setLoading] = useState(false);
+  const [loadingGen, setLoadingGen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [listing, setListing] = useState<GeneratedListing | null>(null);
   const [saved, setSaved] = useState(false);
+  const [usage, setUsage] = useState<Usage | null>(null);
 
   useEffect(() => {
     if (new URLSearchParams(window.location.search).get("upgraded") === "1") {
-      setProPlan();
       const url = new URL(window.location.href);
       url.searchParams.delete("upgraded");
       window.history.replaceState({}, "", url.toString());
@@ -57,12 +56,8 @@ export function Generator() {
       setError("Enter a product name to get started.");
       return;
     }
-    if (!isPro && creditsLeft <= 0) {
-      setError("You have used all your free listings this month. Upgrade to Pro for unlimited.");
-      return;
-    }
 
-    setLoading(true);
+    setLoadingGen(true);
     setError(null);
     setListing(null);
     setSaved(false);
@@ -77,16 +72,17 @@ export function Generator() {
       const data = (await res.json()) as {
         listing?: GeneratedListing | null;
         error?: string;
+        usage?: Usage;
       };
 
       if (!res.ok || !data.listing) {
         setError(data.error ?? "Something went wrong. Please try again.");
+        if (data.usage) setUsage(data.usage);
         return;
       }
 
-      if (!isPro) recordGeneration();
-
       setListing(data.listing);
+      if (data.usage) setUsage(data.usage);
       addToLibrary({
         productName: input.productName,
         marketplace: input.marketplace,
@@ -97,9 +93,42 @@ export function Generator() {
     } catch {
       setError("Could not reach the server. Check your connection and try again.");
     } finally {
-      setLoading(false);
+      setLoadingGen(false);
     }
   }
+
+  // ---- sign-in wall ----
+  if (!loading && !account) {
+    return (
+      <div className="mx-auto max-w-md px-4 sm:px-6">
+        <div className="rounded-3xl border border-ink-200/80 bg-white p-8 text-center shadow-lg shadow-ink-900/5">
+          <span className="inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-brand-50 to-amber-50 text-2xl shadow-sm ring-1 ring-brand-100">
+            ✦
+          </span>
+          <h2 className="mt-5 text-xl font-bold text-ink-900">Create your free account</h2>
+          <p className="mt-2 text-sm leading-relaxed text-ink-500">
+            You&apos;ll get 3 AI listings + 1 audit every month, forever. It takes
+            10 seconds — no credit card.
+          </p>
+          <Link
+            href="/account"
+            className="mt-6 inline-flex w-full items-center justify-center rounded-full bg-gradient-to-br from-brand-500 to-brand-600 px-6 py-3.5 text-sm font-semibold text-white shadow-lg shadow-brand-500/30 transition-all hover:-translate-y-0.5"
+          >
+            Create free account
+          </Link>
+          <Link
+            href="/account"
+            className="mt-3 inline-flex w-full items-center justify-center rounded-full border border-ink-200 bg-white px-6 py-3 text-sm font-semibold text-ink-700 transition-all hover:bg-ink-100"
+          >
+            I already have one — sign in
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  const isPaid = usage ? usage.plan !== "free" : account?.plan !== "free";
+  const remaining = usage ? usage.limitMonthly - usage.usedMonthly : null;
 
   return (
     <div className="mx-auto grid w-full max-w-6xl gap-6 px-4 sm:px-6 lg:grid-cols-[440px_1fr]">
@@ -107,15 +136,17 @@ export function Generator() {
       <div className="space-y-5 self-start rounded-3xl border border-ink-200/80 bg-white p-6 shadow-lg shadow-ink-900/5 lg:sticky lg:top-24">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold text-ink-900">New listing</h2>
-          {isPro ? (
-            <span className="rounded-full bg-gradient-to-r from-purple-100 to-brand-100 px-3 py-1 text-xs font-semibold text-purple-700 ring-1 ring-purple-200">
-              ∞ Pro
+          {remaining !== null ? (
+            <span
+              className={`rounded-full px-3 py-1 text-xs font-semibold ring-1 ${
+                isPaid
+                  ? "bg-purple-50 text-purple-700 ring-purple-200"
+                  : "bg-brand-50 text-brand-700 ring-brand-200"
+              }`}
+            >
+              {isPaid ? `${remaining} left this month` : `${remaining} free left`}
             </span>
-          ) : (
-            <span className="rounded-full bg-brand-50 px-3 py-1 text-xs font-semibold text-brand-700 ring-1 ring-brand-200">
-              {creditsLeft} free left
-            </span>
-          )}
+          ) : null}
         </div>
 
         <div>
@@ -128,7 +159,7 @@ export function Generator() {
             value={input.productName}
             onChange={(e) => set("productName")(e.target.value)}
             placeholder="Hand-poured soy wax candle, lavender"
-            disabled={loading}
+            disabled={loadingGen}
           />
         </div>
 
@@ -140,7 +171,7 @@ export function Generator() {
                 key={m.value}
                 type="button"
                 onClick={() => set("marketplace")(m.value)}
-                disabled={loading}
+                disabled={loadingGen}
                 className={`rounded-xl border px-3.5 py-2.5 text-left transition-all ${
                   input.marketplace === m.value
                     ? "border-brand-500 bg-brand-50 ring-2 ring-brand-500/20"
@@ -162,7 +193,7 @@ export function Generator() {
                 key={t.value}
                 type="button"
                 onClick={() => set("tone")(t.value)}
-                disabled={loading}
+                disabled={loadingGen}
                 className={`rounded-full border px-4 py-2 text-xs font-semibold transition-all ${
                   input.tone === t.value
                     ? "border-brand-500 bg-brand-50 text-brand-700 ring-2 ring-brand-500/20"
@@ -185,7 +216,7 @@ export function Generator() {
             value={input.audience}
             onChange={(e) => set("audience")(e.target.value)}
             placeholder="Brides, new parents, busy professionals…"
-            disabled={loading}
+            disabled={loadingGen}
           />
         </div>
 
@@ -199,23 +230,28 @@ export function Generator() {
             value={input.details}
             onChange={(e) => set("details")(e.target.value)}
             placeholder="Materials, size, handcrafted details, story, what problem it solves…"
-            disabled={loading}
+            disabled={loadingGen}
           />
         </div>
 
         {error ? (
           <div className="animate-scale-in rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
             {error}
+            {error.toLowerCase().includes("limit") || error.toLowerCase().includes("upgrade") ? (
+              <Link href="/#pricing" className="ml-1 font-semibold underline">
+                See plans →
+              </Link>
+            ) : null}
           </div>
         ) : null}
 
         <button
           type="button"
           onClick={generate}
-          disabled={loading}
+          disabled={loadingGen}
           className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-gradient-to-br from-brand-500 to-brand-600 px-6 py-3.5 text-sm font-semibold text-white shadow-lg shadow-brand-500/30 transition-all hover:-translate-y-0.5 hover:shadow-xl hover:shadow-brand-500/40 disabled:cursor-not-allowed disabled:opacity-70 disabled:hover:translate-y-0"
         >
-          {loading ? (
+          {loadingGen ? (
             <>
               <Spinner className="h-4 w-4" />
               Writing your listing…
@@ -223,18 +259,14 @@ export function Generator() {
           ) : (
             <>
               <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M13 10V3L4 14h7v7l9-11h-7z"
-                />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
               </svg>
               Generate listing
             </>
           )}
         </button>
 
-        {!loading && !listing && !error ? (
+        {!loadingGen && !listing && !error ? (
           <p className="text-center text-xs text-ink-400">
             Takes ~10 seconds · Saved to your library automatically
           </p>
@@ -243,9 +275,9 @@ export function Generator() {
 
       {/* ---------- Right: results ---------- */}
       <div className="min-h-[480px] space-y-4">
-        {!listing && !loading ? <EmptyState hasError={!!error} /> : null}
+        {!listing && !loadingGen ? <EmptyState /> : null}
 
-        {loading ? (
+        {loadingGen ? (
           <div className="flex min-h-[480px] flex-col items-center justify-center gap-4 rounded-3xl border border-dashed border-ink-300 bg-white/60">
             <div className="relative">
               <span className="absolute inset-0 rounded-full bg-brand-400/30 animate-[pulse-ring_1.8s_ease-out_infinite]" />
@@ -268,21 +300,25 @@ export function Generator() {
                   <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                 </svg>
                 Saved to your <Link href="/library" className="font-semibold underline">library</Link>
+                {" · "}
+                <Link href="/influencers" className="font-semibold underline">
+                  Want it promoted by creators? →
+                </Link>
               </div>
             ) : null}
 
             <ListingDisplay listing={listing} />
 
-            {!isPro ? (
+            {!isPaid ? (
               <div className="flex items-center justify-between gap-4 rounded-2xl border border-purple-200 bg-gradient-to-r from-purple-50 to-brand-50 p-5">
                 <div>
                   <p className="text-sm font-semibold text-purple-900">
-                    {creditsLeft > 0 ? "Enjoying it?" : "Out of free listings"}
+                    {remaining !== null && remaining > 0 ? "Enjoying it?" : "Out of free listings"}
                   </p>
                   <p className="mt-0.5 text-xs text-purple-700">
-                    {creditsLeft > 0
-                      ? `You have ${creditsLeft} free listing${creditsLeft === 1 ? "" : "s"} left this month.`
-                      : "Upgrade to Pro for unlimited AI listings."}
+                    {remaining !== null && remaining > 0
+                      ? `You have ${remaining} listing${remaining === 1 ? "" : "s"} left this month.`
+                      : "Go Pro for 300 listings/month + bulk + audits."}
                   </p>
                 </div>
                 <Link
@@ -300,15 +336,13 @@ export function Generator() {
   );
 }
 
-function EmptyState({ hasError }: { hasError?: boolean }) {
+function EmptyState() {
   return (
     <div className="relative flex min-h-[480px] flex-col items-center justify-center gap-4 overflow-hidden rounded-3xl border border-dashed border-ink-300 bg-white/60 p-10 text-center">
       <div className="pointer-events-none absolute inset-0 bg-dots opacity-40" />
       <p className="relative text-4xl">✦</p>
       <div className="relative">
-        <p className="text-lg font-semibold text-ink-900">
-          {hasError ? "Ready when you are" : "Your listing appears here"}
-        </p>
+        <p className="text-lg font-semibold text-ink-900">Your listing appears here</p>
         <p className="mx-auto mt-1 max-w-sm text-sm text-ink-500">
           Fill in your product details and hit “Generate listing”. You will get a
           title, description, key benefits, tags, and keywords in seconds.
