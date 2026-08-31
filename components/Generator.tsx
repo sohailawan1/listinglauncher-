@@ -1,74 +1,33 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import type { GeneratedListing, ListingInput, Marketplace, Tone } from "@/lib/types";
 import { DEFAULT_LISTING_INPUT } from "@/lib/prompt";
 import { isProUsage, recordGeneration, remainingCredits, setProPlan, useUsage } from "@/lib/usage";
+import { addToLibrary } from "@/lib/library";
+import { ListingDisplay, Spinner } from "@/components/ListingUI";
 
-const MARKETPLACES: { value: Marketplace; label: string }[] = [
-  { value: "etsy", label: "Etsy" },
-  { value: "amazon", label: "Amazon" },
-  { value: "shopify", label: "Shopify" },
-  { value: "ebay", label: "eBay" },
-  { value: "other", label: "Other" },
+const MARKETPLACES: { value: Marketplace; label: string; hint: string }[] = [
+  { value: "etsy", label: "Etsy", hint: "13 tags · 140-char titles" },
+  { value: "amazon", label: "Amazon", hint: "Search-optimized bullets" },
+  { value: "shopify", label: "Shopify", hint: "Brand storytelling" },
+  { value: "ebay", label: "eBay", hint: "80-char keyword titles" },
+  { value: "other", label: "Other", hint: "Marketplace-agnostic" },
 ];
 
-const TONES: { value: Tone; label: string }[] = [
-  { value: "friendly", label: "Friendly" },
-  { value: "luxury", label: "Luxury" },
-  { value: "playful", label: "Playful" },
-  { value: "minimal", label: "Minimal" },
-  { value: "urgent", label: "Urgent" },
+const TONES: { value: Tone; label: string; emoji: string }[] = [
+  { value: "friendly", label: "Friendly", emoji: "😊" },
+  { value: "luxury", label: "Luxury", emoji: "✨" },
+  { value: "playful", label: "Playful", emoji: "🎉" },
+  { value: "minimal", label: "Minimal", emoji: "🕊️" },
+  { value: "urgent", label: "Urgent", emoji: "🔥" },
 ];
 
 const fieldClasses =
-  "w-full rounded-xl border border-stone-300 bg-white px-4 py-3 text-sm text-stone-900 placeholder:text-stone-400 focus:border-orange-500 focus:outline-none focus:ring-2 focus:ring-orange-500/30";
+  "w-full rounded-xl border border-ink-200 bg-white px-4 py-3 text-sm text-ink-900 shadow-sm transition-all placeholder:text-ink-400 focus:border-brand-500 focus:outline-none focus:ring-4 focus:ring-brand-500/15";
 
-const labelClasses = "mb-1.5 block text-sm font-medium text-stone-700";
-
-function CopyButton({ text, label }: { text: string; label: string }) {
-  const [copied, setCopied] = useState(false);
-
-  async function copy() {
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch {
-      // clipboard unavailable
-    }
-  }
-
-  return (
-    <button
-      type="button"
-      onClick={copy}
-      className="shrink-0 rounded-md border border-stone-300 bg-white px-3 py-1 text-xs font-medium text-stone-600 transition-colors hover:bg-stone-100"
-    >
-      {copied ? "Copied" : `Copy ${label}`}
-    </button>
-  );
-}
-
-function SectionCard({
-  title,
-  children,
-  extra,
-}: {
-  title: string;
-  children: React.ReactNode;
-  extra?: React.ReactNode;
-}) {
-  return (
-    <section className="rounded-2xl border border-stone-200 bg-white p-5 shadow-sm">
-      <div className="mb-3 flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-stone-900">{title}</h3>
-        {extra}
-      </div>
-      {children}
-    </section>
-  );
-}
+const labelClasses = "mb-1.5 block text-sm font-medium text-ink-700";
 
 export function Generator() {
   const usage = useUsage();
@@ -79,6 +38,7 @@ export function Generator() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [listing, setListing] = useState<GeneratedListing | null>(null);
+  const [saved, setSaved] = useState(false);
 
   useEffect(() => {
     if (new URLSearchParams(window.location.search).get("upgraded") === "1") {
@@ -105,6 +65,7 @@ export function Generator() {
     setLoading(true);
     setError(null);
     setListing(null);
+    setSaved(false);
 
     try {
       const res = await fetch("/api/generate", {
@@ -126,6 +87,13 @@ export function Generator() {
       if (!isPro) recordGeneration();
 
       setListing(data.listing);
+      addToLibrary({
+        productName: input.productName,
+        marketplace: input.marketplace,
+        tone: input.tone,
+        listing: data.listing,
+      });
+      setSaved(true);
     } catch {
       setError("Could not reach the server. Check your connection and try again.");
     } finally {
@@ -134,16 +102,17 @@ export function Generator() {
   }
 
   return (
-    <div className="mx-auto grid w-full max-w-5xl gap-6 px-4 sm:px-6 lg:grid-cols-[420px_1fr]">
-      <div className="space-y-4 self-start rounded-2xl border border-stone-200 bg-white p-5 shadow-sm lg:sticky lg:top-24">
+    <div className="mx-auto grid w-full max-w-6xl gap-6 px-4 sm:px-6 lg:grid-cols-[440px_1fr]">
+      {/* ---------- Left: form ---------- */}
+      <div className="space-y-5 self-start rounded-3xl border border-ink-200/80 bg-white p-6 shadow-lg shadow-ink-900/5 lg:sticky lg:top-24">
         <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-stone-900">New listing</h2>
+          <h2 className="text-lg font-semibold text-ink-900">New listing</h2>
           {isPro ? (
-            <span className="rounded-full bg-purple-100 px-3 py-1 text-xs font-semibold text-purple-700">
-              Pro
+            <span className="rounded-full bg-gradient-to-r from-purple-100 to-brand-100 px-3 py-1 text-xs font-semibold text-purple-700 ring-1 ring-purple-200">
+              ∞ Pro
             </span>
           ) : (
-            <span className="rounded-full bg-orange-100 px-3 py-1 text-xs font-semibold text-orange-700">
+            <span className="rounded-full bg-brand-50 px-3 py-1 text-xs font-semibold text-brand-700 ring-1 ring-brand-200">
               {creditsLeft} free left
             </span>
           )}
@@ -151,7 +120,7 @@ export function Generator() {
 
         <div>
           <label htmlFor="productName" className={labelClasses}>
-            Product name *
+            Product name <span className="text-brand-600">*</span>
           </label>
           <input
             id="productName"
@@ -163,42 +132,46 @@ export function Generator() {
           />
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label htmlFor="marketplace" className={labelClasses}>
-              Marketplace
-            </label>
-            <select
-              id="marketplace"
-              className={fieldClasses}
-              value={input.marketplace}
-              onChange={(e) => set("marketplace")(e.target.value as Marketplace)}
-              disabled={loading}
-            >
-              {MARKETPLACES.map((m) => (
-                <option key={m.value} value={m.value}>
-                  {m.label}
-                </option>
-              ))}
-            </select>
+        <div>
+          <span className={labelClasses}>Marketplace</span>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            {MARKETPLACES.map((m) => (
+              <button
+                key={m.value}
+                type="button"
+                onClick={() => set("marketplace")(m.value)}
+                disabled={loading}
+                className={`rounded-xl border px-3.5 py-2.5 text-left transition-all ${
+                  input.marketplace === m.value
+                    ? "border-brand-500 bg-brand-50 ring-2 ring-brand-500/20"
+                    : "border-ink-200 bg-white hover:border-ink-300 hover:bg-ink-50"
+                }`}
+              >
+                <span className="block text-sm font-semibold text-ink-900">{m.label}</span>
+                <span className="block text-[11px] text-ink-400">{m.hint}</span>
+              </button>
+            ))}
           </div>
-          <div>
-            <label htmlFor="tone" className={labelClasses}>
-              Tone
-            </label>
-            <select
-              id="tone"
-              className={fieldClasses}
-              value={input.tone}
-              onChange={(e) => set("tone")(e.target.value as Tone)}
-              disabled={loading}
-            >
-              {TONES.map((t) => (
-                <option key={t.value} value={t.value}>
-                  {t.label}
-                </option>
-              ))}
-            </select>
+        </div>
+
+        <div>
+          <span className={labelClasses}>Tone</span>
+          <div className="flex flex-wrap gap-2">
+            {TONES.map((t) => (
+              <button
+                key={t.value}
+                type="button"
+                onClick={() => set("tone")(t.value)}
+                disabled={loading}
+                className={`rounded-full border px-4 py-2 text-xs font-semibold transition-all ${
+                  input.tone === t.value
+                    ? "border-brand-500 bg-brand-50 text-brand-700 ring-2 ring-brand-500/20"
+                    : "border-ink-200 bg-white text-ink-600 hover:border-ink-300 hover:bg-ink-50"
+                }`}
+              >
+                {t.emoji} {t.label}
+              </button>
+            ))}
           </div>
         </div>
 
@@ -231,7 +204,7 @@ export function Generator() {
         </div>
 
         {error ? (
-          <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          <div className="animate-scale-in rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
             {error}
           </div>
         ) : null}
@@ -240,124 +213,86 @@ export function Generator() {
           type="button"
           onClick={generate}
           disabled={loading}
-          className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-stone-900 px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-stone-700 disabled:cursor-not-allowed disabled:opacity-70"
+          className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-gradient-to-br from-brand-500 to-brand-600 px-6 py-3.5 text-sm font-semibold text-white shadow-lg shadow-brand-500/30 transition-all hover:-translate-y-0.5 hover:shadow-xl hover:shadow-brand-500/40 disabled:cursor-not-allowed disabled:opacity-70 disabled:hover:translate-y-0"
         >
           {loading ? (
             <>
-              <Spinner />
+              <Spinner className="h-4 w-4" />
               Writing your listing…
             </>
           ) : (
-            "Generate listing"
+            <>
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M13 10V3L4 14h7v7l9-11h-7z"
+                />
+              </svg>
+              Generate listing
+            </>
           )}
         </button>
 
-        {!loading && !listing && !error && (
-          <p className="text-center text-xs text-stone-400">
-            Example: “Hand-poured soy wax candle, lavender”
+        {!loading && !listing && !error ? (
+          <p className="text-center text-xs text-ink-400">
+            Takes ~10 seconds · Saved to your library automatically
           </p>
-        )}
+        ) : null}
       </div>
 
-      <div className="min-h-96 space-y-4">
-        {!listing && !loading ? (
-          <EmptyState hasError={!!error} />
-        ) : null}
+      {/* ---------- Right: results ---------- */}
+      <div className="min-h-[480px] space-y-4">
+        {!listing && !loading ? <EmptyState hasError={!!error} /> : null}
 
         {loading ? (
-          <div className="flex min-h-96 flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-stone-300 bg-white">
-            <Spinner />
-            <p className="text-sm text-stone-500">Crafting a high-converting listing…</p>
+          <div className="flex min-h-[480px] flex-col items-center justify-center gap-4 rounded-3xl border border-dashed border-ink-300 bg-white/60">
+            <div className="relative">
+              <span className="absolute inset-0 rounded-full bg-brand-400/30 animate-[pulse-ring_1.8s_ease-out_infinite]" />
+              <Spinner className="relative h-8 w-8 text-brand-600" />
+            </div>
+            <div className="text-center">
+              <p className="text-sm font-semibold text-ink-900">Crafting a high-converting listing…</p>
+              <p className="mt-1 text-xs text-ink-400">
+                Analyzing keywords · Writing title · Optimizing tags
+              </p>
+            </div>
           </div>
         ) : null}
 
         {listing ? (
           <>
-            <SectionCard
-              title="Title"
-              extra={<CopyButton text={listing.title} label="title" />}
-            >
-              <p className="text-base font-medium leading-relaxed text-stone-900">{listing.title}</p>
-              <p className="mt-2 text-xs text-stone-400">Short title: {listing.shortTitle}</p>
-            </SectionCard>
-
-            <SectionCard
-              title="Description"
-              extra={<CopyButton text={listing.description} label="description" />}
-            >
-              <div className="whitespace-pre-line text-sm leading-relaxed text-stone-700">
-                {listing.description}
+            {saved ? (
+              <div className="flex items-center gap-2 rounded-xl border border-green-200 bg-green-50 px-4 py-2.5 text-xs text-green-700">
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                </svg>
+                Saved to your <Link href="/library" className="font-semibold underline">library</Link>
               </div>
-            </SectionCard>
+            ) : null}
 
-            <SectionCard
-              title="Key benefits"
-              extra={
-                <CopyButton text={listing.bulletPoints.join("\n")} label="bullets" />
-              }
-            >
-              <ul className="space-y-2">
-                {listing.bulletPoints.map((point, i) => (
-                  <li key={i} className="flex gap-2 text-sm leading-relaxed text-stone-700">
-                    <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-orange-500" />
-                    {point}
-                  </li>
-                ))}
-              </ul>
-            </SectionCard>
+            <ListingDisplay listing={listing} />
 
-            <SectionCard
-              title="Tags"
-              extra={<CopyButton text={listing.tags.join(", ")} label="tags" />}
-            >
-              <div className="flex flex-wrap gap-2">
-                {listing.tags.map((tag, i) => (
-                  <span
-                    key={i}
-                    className="rounded-full bg-stone-100 px-3 py-1 text-xs font-medium text-stone-700"
-                  >
-                    {tag}
-                  </span>
-                ))}
-              </div>
-            </SectionCard>
-
-            <SectionCard
-              title="Search keywords"
-              extra={<CopyButton text={listing.keywords.join(", ")} label="keywords" />}
-            >
-              <div className="flex flex-wrap gap-2">
-                {listing.keywords.map((k, i) => (
-                  <span
-                    key={i}
-                    className="rounded-full bg-orange-50 px-3 py-1 text-xs font-medium text-orange-700"
-                  >
-                    {k}
-                  </span>
-                ))}
-              </div>
-            </SectionCard>
-
-            {!isPro && (
-              <div className="flex items-center justify-between rounded-2xl border border-purple-200 bg-purple-50 p-5">
+            {!isPro ? (
+              <div className="flex items-center justify-between gap-4 rounded-2xl border border-purple-200 bg-gradient-to-r from-purple-50 to-brand-50 p-5">
                 <div>
                   <p className="text-sm font-semibold text-purple-900">
                     {creditsLeft > 0 ? "Enjoying it?" : "Out of free listings"}
                   </p>
-                  <p className="text-xs text-purple-700">
+                  <p className="mt-0.5 text-xs text-purple-700">
                     {creditsLeft > 0
                       ? `You have ${creditsLeft} free listing${creditsLeft === 1 ? "" : "s"} left this month.`
                       : "Upgrade to Pro for unlimited AI listings."}
                   </p>
                 </div>
-                <a
-                  href="#pricing"
-                  className="shrink-0 rounded-full bg-purple-700 px-4 py-2 text-xs font-semibold text-white transition-colors hover:bg-purple-800"
+                <Link
+                  href="/#pricing"
+                  className="shrink-0 rounded-full bg-purple-700 px-4 py-2 text-xs font-semibold text-white transition-all hover:-translate-y-0.5 hover:bg-purple-800"
                 >
                   Go Pro
-                </a>
+                </Link>
               </div>
-            )}
+            ) : null}
           </>
         ) : null}
       </div>
@@ -365,35 +300,18 @@ export function Generator() {
   );
 }
 
-function Spinner() {
-  return (
-    <svg
-      className="h-4 w-4 animate-spin"
-      viewBox="0 0 24 24"
-      fill="none"
-      aria-hidden="true"
-    >
-      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-      <path
-        className="opacity-75"
-        fill="currentColor"
-        d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
-      />
-    </svg>
-  );
-}
-
 function EmptyState({ hasError }: { hasError?: boolean }) {
   return (
-    <div className="flex min-h-96 flex-col items-center justify-center gap-4 rounded-2xl border border-dashed border-stone-300 bg-white p-10 text-center">
-      <p className="text-4xl">✦</p>
-      <div>
-        <p className="text-lg font-semibold text-stone-900">
+    <div className="relative flex min-h-[480px] flex-col items-center justify-center gap-4 overflow-hidden rounded-3xl border border-dashed border-ink-300 bg-white/60 p-10 text-center">
+      <div className="pointer-events-none absolute inset-0 bg-dots opacity-40" />
+      <p className="relative text-4xl">✦</p>
+      <div className="relative">
+        <p className="text-lg font-semibold text-ink-900">
           {hasError ? "Ready when you are" : "Your listing appears here"}
         </p>
-        <p className="mx-auto mt-1 max-w-sm text-sm text-stone-500">
-          Fill in your product details on the left and hit “Generate listing”. You will get
-          a title, description, key benefits, tags, and keywords in seconds.
+        <p className="mx-auto mt-1 max-w-sm text-sm text-ink-500">
+          Fill in your product details and hit “Generate listing”. You will get a
+          title, description, key benefits, tags, and keywords in seconds.
         </p>
       </div>
     </div>

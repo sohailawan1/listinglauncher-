@@ -22,3 +22,42 @@ export type GenerateResponse = {
   listing: GeneratedListing | null;
   error?: string;
 };
+
+export type AuditIssue = {
+  type: "title" | "description" | "tags" | "keywords" | "general";
+  severity: "high" | "medium" | "low";
+  message: string;
+  fix: string;
+};
+
+export type AuditInput = {
+  title: string;
+  description: string;
+  tags?: string[];
+  keywords?: string[];
+  marketplace?: Marketplace;
+};
+
+export type AuditReport = {
+  score: number;
+  grade: string;
+  summary: string;
+  issues: AuditIssue[];
+  improvedListing: GeneratedListing;
+};
+
+export type AuditResponse = {
+  report: AuditReport | null;
+  error?: string;
+};
+
+export type BulkRowInput = {
+  productName: string;
+  details?: string;
+};
+
+export type BulkResponse = {
+  listings: GeneratedListing[];
+  failed: { productName: string; error: string }[];
+  error?: string;
+};

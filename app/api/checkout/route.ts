@@ -1,20 +1,26 @@
 import { createCheckoutSession } from "@/lib/stripe";
+import type { PlanId } from "@/lib/plans";
 
 export const runtime = "nodejs";
 
+const VALID_PLANS: PlanId[] = ["free", "pro", "business"];
+
 export async function POST(request: Request): Promise<Response> {
-  let plan: "free" | "pro";
+  let plan: PlanId;
   try {
     const body = (await request.json()) as { plan?: string };
-    if (body.plan !== "pro" && body.plan !== "free") {
+    if (!VALID_PLANS.includes(body.plan as PlanId)) {
       return Response.json({ error: "Unknown plan." }, { status: 400 });
     }
-    plan = body.plan;
+    plan = body.plan as PlanId;
   } catch {
     return Response.json({ error: "Invalid request body." }, { status: 400 });
   }
 
-  const origin = request.headers.get("origin") ?? process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
+  const origin =
+    request.headers.get("origin") ??
+    process.env.NEXT_PUBLIC_SITE_URL ??
+    "http://localhost:3000";
 
   const session = await createCheckoutSession({ plan, origin });
 
