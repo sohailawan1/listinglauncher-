@@ -1,40 +1,36 @@
-import { getStore, getSessionAccount, SESSION_COOKIE, recordError, dayKey } from "@/lib/store";
+import {
+  getCreator,
+  getSessionAccount,
+  saveBooking,
+  SESSION_COOKIE,
+  type Booking,
+} from "@/lib/store";
+import { createBookingPaymentIntent } from "@/lib/stripe";
+import { sendEmail } from "@/lib/email";
 import { cookies } from "next/headers";
 
 export const runtime = "nodejs";
 
-export type InfluencerBooking = {
-  id: string;
-  createdAt: number;
-  sellerAccountId: string;
-  sellerEmail: string;
-  listingTitle: string;
-  productLink?: string;
-  platform: "etsy" | "amazon" | "shopify" | "ebay" | "tiktok" | "instagram" | "youtube";
-  budget: number;
-  notes?: string;
-  status: "pending" | "approved" | "rejected";
-};
-
-const VALID_PLATFORMS = ["etsy", "amazon", "shopify", "ebay", "tiktok", "instagram", "youtube"];
-const VALID_STATUSES = ["pending", "approved", "rejected"];
+const VALID_PLATFORMS = ["tiktok", "instagram", "youtube", "other"];
+const VALID_STATUSES = ["pending", "in_progress", "delivered", "completed", "rejected", "refunded", "cancelled"];
 
 export async function GET(): Promise<Response> {
-  // Owners can list bookings; the store keys are scanned.
-  const store = getStore();
-  const keys = await store.keys("booking:*");
-  const bookings: InfluencerBooking[] = [];
-  for (const key of keys) {
-    const raw = await store.get(key);
-    if (!raw) continue;
-    try {
-      bookings.push(JSON.parse(raw) as InfluencerBooking);
-    } catch {
-      // skip corrupt rows
-    }
-  }
-  bookings.sort((a, b) => b.createdAt - a.createdAt);
-  return Response.json({ bookings: bookings.slice(0, 100) });
+  const jar = await cookies();
+  const token = jar.get(SESSION_COOKIE)?.value;
+  const account = token ? await getSessionAccount(token) : null;
+  if (!account) return Response.json({ bookings: [] });
+
+  const { getCreatorByOwner, listAllBookings, ADMIN_COOKIE } = await import("@/lib/store");
+  const isAdmin = jar.get(ADMIN_COOKIE)?.value === "ok";
+
+  // Sellers see bookings they made; creators see bookings assigned to them.
+  const creatorProfile = await getCreatorByOwner(account.id);
+  const all = await listAllBookings();
+  const mine = creatorProfile
+    ? all.filter((b) => b.creatorId === creatorProfile.id)
+    : all.filter((b) => b.sellerAccountId === account.id);
+  if (!isAdmin) return Response.json({ bookings: mine });
+  return Response.json({ bookings: all });
 }
 
 export async function POST(request: Request): Promise<Response> {
@@ -43,12 +39,13 @@ export async function POST(request: Request): Promise<Response> {
   const account = token ? await getSessionAccount(token) : null;
   if (!account) {
     return Response.json(
-      { error: "Create a free account first to book influencer promotions." },
+      { error: "Create a free account first to book creator promotions." },
       { status: 401 }
     );
   }
 
   let body: {
+    creatorId?: string;
     listingTitle?: string;
     productLink?: string;
     platform?: string;
@@ -61,50 +58,78 @@ export async function POST(request: Request): Promise<Response> {
     return Response.json({ error: "Invalid request body." }, { status: 400 });
   }
 
+  const creatorId = String(body.creatorId ?? "").trim();
   const listingTitle = (body.listingTitle ?? "").trim().slice(0, 200);
   const platform = (body.platform ?? "").trim().toLowerCase();
-  const budget = Math.max(5, Math.min(10000, Math.round(Number(body.budget) || 0)));
+  const budget = Math.max(15, Math.min(10_000, Math.round(Number(body.budget) || 0)));
 
+  const creator = await getCreator(creatorId);
+  if (!creator || creator.status !== "approved") {
+    return Response.json({ error: "This creator isn't accepting bookings right now." }, { status: 400 });
+  }
+  if (!creator.stripeOnboarded || !creator.stripeAccountId) {
+    return Response.json(
+      { error: "This creator hasn't set up payouts yet. Try another creator." },
+      { status: 400 }
+    );
+  }
   if (!listingTitle) {
     return Response.json({ error: "Enter the listing you want promoted." }, { status: 400 });
   }
   if (!VALID_PLATFORMS.includes(platform)) {
     return Response.json({ error: "Choose a promotion platform." }, { status: 400 });
   }
-  if (budget < 5) {
-    return Response.json({ error: "Minimum budget is $5." }, { status: 400 });
+  if (creator.rateMin > 0 && budget < creator.rateMin) {
+    return Response.json(
+      { error: `This creator's minimum is $${creator.rateMin}.` },
+      { status: 400 }
+    );
   }
 
-  const booking: InfluencerBooking = {
+  const booking: Booking = {
     id: `b_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 9)}`,
     createdAt: Date.now(),
+    updatedAt: Date.now(),
     sellerAccountId: account.id,
     sellerEmail: account.email,
+    creatorId: creator.id,
+    creatorName: creator.name,
     listingTitle,
     productLink: body.productLink?.trim().slice(0, 300) || undefined,
-    platform: platform as InfluencerBooking["platform"],
+    platform: platform as Booking["platform"],
     budget,
     notes: body.notes?.trim().slice(0, 1000) || undefined,
     status: "pending",
+    paymentStatus: "unpaid",
   };
 
-  const store = getStore();
-  await store.set(`booking:${booking.id}`, JSON.stringify(booking));
-  await store.incr(`stats:bookings:${dayKey()}`);
-  await store.incr(`stats:bookings:total`);
-  await store.incr(`stats:bookings:volume:${dayKey()}`).catch(() => {});
+  // Try to create a Stripe payment intent. If Stripe isn't configured, the
+  // booking is still created with paymentStatus=unpaid — admin can reconcile.
+  const intent = await createBookingPaymentIntent({
+    amountCents: budget * 100,
+    sellerEmail: account.email,
+    sellerAccountId: account.id,
+    creatorId: creator.id,
+    bookingId: booking.id,
+    listingTitle,
+  });
+  if (intent) {
+    booking.paymentIntentId = intent.paymentIntentId;
+  }
 
-  return Response.json({ booking });
+  await saveBooking(booking);
+  await sendEmail(account.email, "booking_received", { listingTitle, budget });
+
+  return Response.json({ booking, clientSecret: intent?.clientSecret ?? null });
 }
 
 export async function PATCH(request: Request): Promise<Response> {
-  // Owner-only: update booking status.
   const jar = await cookies();
-  if (jar.get("ll_admin")?.value !== "ok") {
-    return Response.json({ error: "Not authorized." }, { status: 401 });
-  }
+  const isAdmin = jar.get("ll_admin")?.value === "ok";
+  const token = jar.get(SESSION_COOKIE)?.value;
+  const account = token ? await getSessionAccount(token) : null;
 
-  let body: { id?: string; status?: string };
+  let body: { id?: string; status?: string; deliveryUrl?: string };
   try {
     body = await request.json();
   } catch {
@@ -112,22 +137,45 @@ export async function PATCH(request: Request): Promise<Response> {
   }
 
   if (!body.id || !VALID_STATUSES.includes(body.status ?? "")) {
-    return Response.json({ error: "Provide booking id and a valid status." }, { status: 400 });
+    return Response.json({ error: "Provide a booking id and valid status." }, { status: 400 });
   }
 
-  const store = getStore();
-  const raw = await store.get(`booking:${body.id}`);
-  if (!raw) {
-    return Response.json({ error: "Booking not found." }, { status: 404 });
+  const { getBooking, saveBooking, getCreator } = await import("@/lib/store");
+  const booking = await getBooking(body.id);
+  if (!booking) return Response.json({ error: "Booking not found." }, { status: 404 });
+
+  const isSeller = account?.id === booking.sellerAccountId;
+  const creatorProfile = await getCreator(booking.creatorId);
+  const isCreator = creatorProfile?.ownerAccountId === account?.id;
+  const sellerOk =
+    isSeller && (body.status === "in_progress" || body.status === "cancelled" || body.status === "completed");
+  const creatorOk =
+    isCreator && (body.status === "in_progress" || body.status === "delivered" || body.status === "rejected");
+  if (!isAdmin && !sellerOk && !creatorOk) {
+    return Response.json({ error: "You can't perform this action." }, { status: 403 });
   }
 
-  try {
-    const booking = JSON.parse(raw) as InfluencerBooking;
-    booking.status = body.status as InfluencerBooking["status"];
-    await store.set(`booking:${body.id}`, JSON.stringify(booking));
-    return Response.json({ booking });
-  } catch {
-    recordError("booking-corrupt").catch(() => {});
-    return Response.json({ error: "Could not update booking." }, { status: 500 });
+  booking.status = body.status as Booking["status"];
+  booking.updatedAt = Date.now();
+  if (body.status === "delivered") booking.deliveredAt = Date.now();
+  if (body.status === "completed") booking.completedAt = Date.now();
+
+  await saveBooking(booking);
+
+  if (body.status === "delivered") {
+    await sendEmail(booking.sellerEmail, "booking_delivered", {
+      creatorName: booking.creatorName,
+      listingTitle: booking.listingTitle,
+      url: `${process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000"}/creators/${booking.creatorId}?booking=${booking.id}`,
+    });
   }
+  if (body.status === "in_progress" && !isCreator && creatorProfile) {
+    await sendEmail(creatorProfile.email, "booking_accepted", {
+      creatorName: creatorProfile.name,
+      listingTitle: booking.listingTitle,
+      deadline: new Date(Date.now() + 7 * 24 * 3600 * 1000).toLocaleDateString(),
+    }).catch(() => {});
+  }
+
+  return Response.json({ booking });
 }

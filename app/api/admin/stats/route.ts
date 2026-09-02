@@ -1,5 +1,6 @@
 import { ADMIN_COOKIE, getAdminStats } from "@/lib/store";
 import { cookies } from "next/headers";
+import { listAllBookings, listAllCreators, type Booking, type CreatorProfile } from "@/lib/store";
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { timingSafeEqual } = require("crypto") as typeof import("crypto");
 
@@ -20,7 +21,9 @@ export async function GET(): Promise<Response> {
     return Response.json({ error: "Not authorized." }, { status: 401 });
   }
   const stats = await getAdminStats();
-  return Response.json({ stats });
+  const creators: CreatorProfile[] = await listAllCreators();
+  const bookings: Booking[] = await listAllBookings();
+  return Response.json({ stats, creators, bookings });
 }
 
 export async function POST(request: Request): Promise<Response> {

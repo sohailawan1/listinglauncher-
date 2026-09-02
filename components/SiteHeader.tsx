@@ -7,10 +7,12 @@ import { useAuth } from "@/components/AuthContext";
 
 const navLinks = [
   { href: "/#features", label: "Features" },
-  { href: "/audit", label: "Listing Audit" },
+  { href: "/audit", label: "Audit" },
   { href: "/bulk", label: "Bulk" },
-  { href: "/influencers", label: "Creators" },
-  { href: "/library", label: "Library" },
+  { href: "/photo", label: "Photos" },
+  { href: "/creators", label: "Creators" },
+  { href: "/affiliate", label: "Earn 30%" },
+  { href: "/blog", label: "Blog" },
   { href: "/#pricing", label: "Pricing" },
 ];
 

@@ -28,9 +28,27 @@ export async function POST(request: Request): Promise<Response> {
     if ("error" in result) {
       return Response.json({ error: result.error }, { status: 400 });
     }
-    const token = await createSession(result.id);
+    const sessionToken = await createSession(result.id);
     const jar = await cookies();
-    jar.set(SESSION_COOKIE, token, {
+
+    // Affiliate attribution: if a ?ref= code is in cookies, record the referral.
+    const refCode = jar.get("ll_ref")?.value;
+    if (refCode) {
+      const { getAffiliateByCode, recordAffiliateReferral } = await import("@/lib/store");
+      const aff = await getAffiliateByCode(refCode);
+      if (aff) {
+        await recordAffiliateReferral({
+          id: `r_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 9)}`,
+          affiliateCode: refCode,
+          referredAccountId: result.id,
+          monthlyAmount: 0,
+          recordedAt: Date.now(),
+        });
+      }
+      jar.delete("ll_ref");
+    }
+
+    jar.set(SESSION_COOKIE, sessionToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
@@ -47,9 +65,9 @@ export async function POST(request: Request): Promise<Response> {
     if (!account || !verifyPassword(password, account.passwordHash)) {
       return Response.json({ error: "Wrong email or password." }, { status: 401 });
     }
-    const token = await createSession(account.id);
+    const sessionToken = await createSession(account.id);
     const jar = await cookies();
-    jar.set(SESSION_COOKIE, token, {
+    jar.set(SESSION_COOKIE, sessionToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",

@@ -60,7 +60,15 @@ function createUpstashStore(url: string, token: string): UpstashStore {
 /* ------------------------- In-memory fallback -------------------------- */
 
 function createMemoryStore(): Store {
-  const map = new Map<string, string>();
+  // Attach to globalThis so every module-instance (Next dev creates a
+  // separate instance per route) shares the same in-memory Map.
+  const g = globalThis as typeof globalThis & {
+    __llMemoryMap?: Map<string, string>;
+    __llMemoryExpirations?: Map<string, number>;
+  };
+  const map = g.__llMemoryMap ?? (g.__llMemoryMap = new Map<string, string>());
+  const expirations =
+    g.__llMemoryExpirations ?? (g.__llMemoryExpirations = new Map<string, number>());
   return {
     async get(key) {
       return map.get(key) ?? null;
@@ -77,7 +85,6 @@ function createMemoryStore(): Store {
       return next;
     },
     async expire(key, seconds) {
-      // TTL approximated: store expiry alongside the value in a side map.
       expirations.set(key, Date.now() + seconds * 1000);
     },
     async keys(pattern) {
@@ -94,23 +101,23 @@ function createMemoryStore(): Store {
   };
 }
 
-const expirations = new Map<string, number>();
-
 /* ------------------------------ singleton ------------------------------- */
 
-let storeInstance: Store | null = null;
-
 export function getStore(): Store {
-  if (storeInstance) return storeInstance;
+  // Pin the singleton to globalThis so it survives module reloads in Next dev.
+  const g = globalThis as typeof globalThis & { __llStoreInstance?: Store };
+  if (g.__llStoreInstance) return g.__llStoreInstance;
   const url = process.env.UPSTASH_REDIS_REST_URL;
   const token = process.env.UPSTASH_REDIS_REST_TOKEN;
+  let inst: Store;
   if (url && token) {
-    storeInstance = createUpstashStore(url, token);
+    inst = createUpstashStore(url, token);
   } else {
-    console.warn("[store] UPSTASH_REDIS not configured — using in-memory store. Usage stats reset on restart; do not use in production.");
-    storeInstance = createMemoryStore();
+    console.warn("[store] UPSTASH_REDIS not configured - using in-memory store. Usage stats reset on restart; do not use in production.");
+    inst = createMemoryStore();
   }
-  return storeInstance;
+  g.__llStoreInstance = inst;
+  return inst;
 }
 
 export function isRedisConfigured(): boolean {
@@ -476,3 +483,306 @@ export async function getAdminStats(): Promise<AdminStats> {
 }
 
 export const ADMIN_COOKIE = "ll_admin";
+
+/* ============================== CREATORS ================================= */
+
+export type CreatorProfile = {
+  id: string;
+  ownerAccountId: string;
+  name: string;
+  email: string;
+  bio: string;
+  platforms: string[];
+  niches: string[];
+  followers: number;
+  rateMin: number;
+  rateMax: number;
+  portfolio: string[];
+  status: "pending" | "approved" | "rejected" | "suspended";
+  stripeAccountId: string | null;
+  stripeOnboarded: boolean;
+  createdAt: number;
+  approvedAt: number | null;
+};
+
+export type CreatorReview = {
+  id: string;
+  creatorId: string;
+  bookingId: string;
+  sellerAccountId: string;
+  rating: number;
+  text: string;
+  createdAt: number;
+};
+
+export async function saveCreator(creator: CreatorProfile): Promise<void> {
+  const store = getStore();
+  await store.set(`creator:${creator.id}`, JSON.stringify(creator));
+  await store.set(`creator:owner:${creator.ownerAccountId}`, creator.id);
+}
+
+export async function getCreator(id: string): Promise<CreatorProfile | null> {
+  const store = getStore();
+  const raw = await store.get(`creator:${id}`);
+  return raw ? (JSON.parse(raw) as CreatorProfile) : null;
+}
+
+export async function getCreatorByOwner(ownerAccountId: string): Promise<CreatorProfile | null> {
+  const store = getStore();
+  const id = await store.get(`creator:owner:${ownerAccountId}`);
+  return id ? getCreator(id) : null;
+}
+
+export async function listApprovedCreators(): Promise<CreatorProfile[]> {
+  const store = getStore();
+  const keys = await store.keys("creator:*");
+  const out: CreatorProfile[] = [];
+  for (const key of keys) {
+    if (key.startsWith("creator:owner:") || key.startsWith("creator:bookings:")) continue;
+    const raw = await store.get(key);
+    if (!raw) continue;
+    try {
+      const c = JSON.parse(raw) as CreatorProfile;
+      if (c.status === "approved") out.push(c);
+    } catch {
+      // skip corrupt rows
+    }
+  }
+  out.sort((a, b) => (b.approvedAt ?? 0) - (a.approvedAt ?? 0));
+  return out;
+}
+
+export async function listAllCreators(): Promise<CreatorProfile[]> {
+  const store = getStore();
+  const keys = await store.keys("creator:*");
+  const out: CreatorProfile[] = [];
+  for (const key of keys) {
+    if (key.startsWith("creator:owner:") || key.startsWith("creator:bookings:")) continue;
+    const raw = await store.get(key);
+    if (!raw) continue;
+    try {
+      out.push(JSON.parse(raw) as CreatorProfile);
+    } catch {
+      // skip
+    }
+  }
+  out.sort((a, b) => b.createdAt - a.createdAt);
+  return out;
+}
+
+export async function addCreatorReview(review: CreatorReview): Promise<void> {
+  const store = getStore();
+  await store.set(`creator:review:${review.id}`, JSON.stringify(review));
+  await store.incr(`stats:reviews:total`);
+}
+
+export async function listCreatorReviews(creatorId: string): Promise<CreatorReview[]> {
+  const store = getStore();
+  const keys = await store.keys("creator:review:*");
+  const out: CreatorReview[] = [];
+  for (const key of keys) {
+    const raw = await store.get(key);
+    if (!raw) continue;
+    try {
+      const r = JSON.parse(raw) as CreatorReview;
+      if (r.creatorId === creatorId) out.push(r);
+    } catch {
+      // skip
+    }
+  }
+  out.sort((a, b) => b.createdAt - a.createdAt);
+  return out;
+}
+
+/* ============================== BOOKINGS ================================== */
+
+export type Booking = {
+  id: string;
+  createdAt: number;
+  sellerAccountId: string;
+  sellerEmail: string;
+  creatorId: string;
+  creatorName: string;
+  listingTitle: string;
+  productLink?: string;
+  platform: "tiktok" | "instagram" | "youtube" | "other";
+  budget: number;
+  notes?: string;
+  status: "pending" | "in_progress" | "delivered" | "completed" | "rejected" | "refunded" | "cancelled";
+  paymentIntentId?: string;
+  paymentStatus: "unpaid" | "held" | "released" | "refunded";
+  platformFee?: number;
+  creatorPayout?: number;
+  deliveredAt?: number;
+  completedAt?: number;
+  updatedAt: number;
+};
+
+export async function saveBooking(booking: Booking): Promise<void> {
+  const store = getStore();
+  await store.set(`booking:${booking.id}`, JSON.stringify(booking));
+}
+
+export async function getBooking(id: string): Promise<Booking | null> {
+  const store = getStore();
+  const raw = await store.get(`booking:${id}`);
+  return raw ? (JSON.parse(raw) as Booking) : null;
+}
+
+export async function listBookingsForCreator(creatorId: string): Promise<Booking[]> {
+  const store = getStore();
+  const keys = await store.keys("booking:*");
+  const out: Booking[] = [];
+  for (const key of keys) {
+    const raw = await store.get(key);
+    if (!raw) continue;
+    try {
+      const b = JSON.parse(raw) as Booking;
+      if (b.creatorId === creatorId) out.push(b);
+    } catch {
+      // skip
+    }
+  }
+  out.sort((a, b) => b.createdAt - a.createdAt);
+  return out;
+}
+
+export async function listAllBookings(): Promise<Booking[]> {
+  const store = getStore();
+  const keys = await store.keys("booking:*");
+  const out: Booking[] = [];
+  for (const key of keys) {
+    const raw = await store.get(key);
+    if (!raw) continue;
+    try {
+      out.push(JSON.parse(raw) as Booking);
+    } catch {
+      // skip
+    }
+  }
+  out.sort((a, b) => b.updatedAt - a.updatedAt);
+  return out;
+}
+
+/* =============================== AFFILIATES =============================== */
+
+export type Affiliate = {
+  id: string;
+  ownerAccountId: string;
+  code: string;
+  rate: number;
+  status: "active" | "disabled";
+  totalEarnings: number;
+  pendingEarnings: number;
+  createdAt: number;
+};
+
+export type AffiliateReferral = {
+  id: string;
+  affiliateCode: string;
+  referredAccountId: string;
+  monthlyAmount: number;
+  recordedAt: number;
+};
+
+export async function saveAffiliate(affiliate: Affiliate): Promise<void> {
+  const store = getStore();
+  await store.set(`affiliate:${affiliate.id}`, JSON.stringify(affiliate));
+  await store.set(`affiliate:code:${affiliate.code}`, affiliate.id);
+  await store.set(`affiliate:owner:${affiliate.ownerAccountId}`, affiliate.id);
+}
+
+export async function getAffiliateByCode(code: string): Promise<Affiliate | null> {
+  const store = getStore();
+  const id = await store.get(`affiliate:code:${code}`);
+  return id ? getAffiliateById(id) : null;
+}
+
+export async function getAffiliateByOwner(ownerAccountId: string): Promise<Affiliate | null> {
+  const store = getStore();
+  const id = await store.get(`affiliate:owner:${ownerAccountId}`);
+  return id ? getAffiliateById(id) : null;
+}
+
+export async function getAffiliateById(id: string): Promise<Affiliate | null> {
+  const store = getStore();
+  const raw = await store.get(`affiliate:${id}`);
+  return raw ? (JSON.parse(raw) as Affiliate) : null;
+}
+
+export async function recordAffiliateReferral(ref: AffiliateReferral): Promise<void> {
+  const store = getStore();
+  await store.set(`affiliate:referral:${ref.id}`, JSON.stringify(ref));
+  await store.incr(`stats:affiliate:referrals:total`);
+}
+
+export async function listAffiliateReferrals(code: string): Promise<AffiliateReferral[]> {
+  const store = getStore();
+  const keys = await store.keys("affiliate:referral:*");
+  const out: AffiliateReferral[] = [];
+  for (const key of keys) {
+    const raw = await store.get(key);
+    if (!raw) continue;
+    try {
+      const r = JSON.parse(raw) as AffiliateReferral;
+      if (r.affiliateCode === code) out.push(r);
+    } catch {
+      // skip
+    }
+  }
+  out.sort((a, b) => b.recordedAt - a.recordedAt);
+  return out;
+}
+
+/* =============================== PHOTOS =================================== */
+
+export type PhotoJob = {
+  id: string;
+  accountId: string;
+  status: "queued" | "processing" | "done" | "failed";
+  mode: "background_removal" | "lifestyle";
+  sourceUrl?: string;
+  resultUrl?: string;
+  prompt?: string;
+  error?: string;
+  createdAt: number;
+  completedAt?: number;
+};
+
+export async function savePhotoJob(job: PhotoJob): Promise<void> {
+  const store = getStore();
+  await store.set(`photo:${job.id}`, JSON.stringify(job));
+  await store.incr(`stats:photos:total`);
+}
+
+export async function getPhotoJob(id: string): Promise<PhotoJob | null> {
+  const store = getStore();
+  const raw = await store.get(`photo:${id}`);
+  return raw ? (JSON.parse(raw) as PhotoJob) : null;
+}
+
+export async function listPhotoJobsForAccount(accountId: string): Promise<PhotoJob[]> {
+  const store = getStore();
+  const keys = await store.keys("photo:*");
+  const out: PhotoJob[] = [];
+  for (const key of keys) {
+    const raw = await store.get(key);
+    if (!raw) continue;
+    try {
+      const j = JSON.parse(raw) as PhotoJob;
+      if (j.accountId === accountId) out.push(j);
+    } catch {
+      // skip
+    }
+  }
+  out.sort((a, b) => b.createdAt - a.createdAt);
+  return out;
+}
+
+/* ============================== WAITLIST ================================== */
+
+export async function recordWaitlist(email: string): Promise<void> {
+  const store = getStore();
+  await store.set(`waitlist:${email.toLowerCase()}`, new Date().toISOString());
+  await store.incr(`stats:waitlist:total`);
+}

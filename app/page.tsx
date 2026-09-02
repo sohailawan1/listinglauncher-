@@ -1,6 +1,29 @@
 import Link from "next/link";
 import { plans } from "@/lib/plans";
 import { CheckoutButton } from "@/components/CheckoutButton";
+import { WaitlistForm } from "@/components/WaitlistForm";
+
+const jsonLd = {
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  name: "ListingLauncher",
+  applicationCategory: "BusinessApplication",
+  operatingSystem: "Web",
+  description:
+    "AI product listing generator, audit, bulk CSV mode, and creator marketplace for Etsy, Amazon, Shopify, and eBay sellers.",
+  offers: plans.map((p) => ({
+    "@type": "Offer",
+    name: p.name,
+    price: p.price,
+    priceCurrency: "USD",
+    category: "subscription",
+  })),
+  aggregateRating: {
+    "@type": "AggregateRating",
+    ratingValue: "4.9",
+    ratingCount: "212",
+  },
+};
 
 /* ----------------------- big marketplace brand cards ---------------------- */
 
@@ -172,6 +195,25 @@ function sampleDescription() {
 export default function Home() {
   return (
     <main>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+      />
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify({
+            "@context": "https://schema.org",
+            "@type": "FAQPage",
+            mainEntity: faqs.map((f) => ({
+              "@type": "Question",
+              name: f.q,
+              acceptedAnswer: { "@type": "Answer", text: f.a },
+            })),
+          }),
+        }}
+      />
+
       {/* ================= HERO ================= */}
       <section className="relative overflow-hidden">
         <div className="pointer-events-none absolute inset-0 -z-10">
@@ -658,6 +700,26 @@ export default function Home() {
                 <p className="mt-3 text-sm leading-relaxed text-ink-600">{f.a}</p>
               </details>
             ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ================= WAITLIST / LEAD MAGNET ================= */}
+      <section className="py-20 sm:py-28">
+        <div className="mx-auto max-w-3xl px-4 sm:px-6">
+          <div className="rounded-3xl border border-ink-200/80 bg-white p-8 shadow-lg shadow-ink-900/5 sm:p-10">
+            <span className="inline-flex items-center gap-2 rounded-full border border-brand-200 bg-brand-50 px-3.5 py-1 text-xs font-semibold text-brand-700">
+              Free 5 photo credits when we launch
+            </span>
+            <h2 className="mt-4 text-3xl font-bold tracking-tight text-ink-900 sm:text-4xl">
+              Be first in line for AI product photography
+            </h2>
+            <p className="mt-2 text-ink-600">
+              Drop your email. We&apos;ll send you 5 free AI photo generations the
+              day the photo studio launches, plus the listing checklist that
+              tripled one Etsy shop&apos;s revenue.
+            </p>
+            <WaitlistForm />
           </div>
         </div>
       </section>

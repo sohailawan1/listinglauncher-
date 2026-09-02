@@ -37,7 +37,7 @@ export async function createCheckoutSession(args: {
   const session = await stripe.checkout.sessions.create({
     mode: "subscription",
     line_items: [{ price: priceId, quantity: 1 }],
-    success_url: `${args.origin}/generate?upgraded=1`,
+    success_url: `${args.origin}/account?upgraded=1`,
     cancel_url: `${args.origin}/#pricing`,
     ...(args.email ? { customer_email: args.email } : {}),
     subscription_data: {
@@ -50,4 +50,136 @@ export async function createCheckoutSession(args: {
   });
 
   return session.url ? { url: session.url } : null;
+}
+
+/* ============================ STRIPE CONNECT ============================= */
+
+export const PLATFORM_FEE_PERCENT = 15;
+
+export type ConnectAccount = {
+  id: string;
+  onboardingUrl: string;
+  detailsSubmitted: boolean;
+  payoutsEnabled: boolean;
+};
+
+export async function createConnectAccount(args: {
+  email: string;
+  name: string;
+  origin: string;
+  returnUrl: string;
+  refreshUrl: string;
+}): Promise<ConnectAccount | null> {
+  const stripe = getStripe();
+  if (!stripe) return null;
+
+  const account = await stripe.accounts.create({
+    type: "express",
+    email: args.email,
+    business_type: "individual",
+    capabilities: {
+      transfers: { requested: true },
+      card_payments: { requested: true },
+    },
+    business_profile: {
+      name: args.name,
+      product_description: "Promoting small business product listings on TikTok, Instagram and YouTube.",
+    },
+    metadata: { app: "listinglauncher" },
+  });
+
+  const link = await stripe.accountLinks.create({
+    account: account.id,
+    refresh_url: args.refreshUrl,
+    return_url: args.returnUrl,
+    type: "account_onboarding",
+  });
+
+  return {
+    id: account.id,
+    onboardingUrl: link.url,
+    detailsSubmitted: Boolean(account.details_submitted),
+    payoutsEnabled: Boolean(account.payouts_enabled),
+  };
+}
+
+export async function getConnectAccountStatus(accountId: string) {
+  const stripe = getStripe();
+  if (!stripe) return null;
+  const acc = await stripe.accounts.retrieve(accountId);
+  return {
+    detailsSubmitted: Boolean(acc.details_submitted),
+    payoutsEnabled: Boolean(acc.payouts_enabled),
+    chargesEnabled: Boolean(acc.charges_enabled),
+    requirements: acc.requirements?.currently_due ?? [],
+  };
+}
+
+/**
+ * Create a PaymentIntent on the PLATFORM account. Money is held in the
+ * platform balance until the admin releases it to the creator.
+ */
+export async function createBookingPaymentIntent(args: {
+  amountCents: number;
+  sellerEmail: string;
+  sellerAccountId: string;
+  creatorId: string;
+  bookingId: string;
+  listingTitle: string;
+}): Promise<{ clientSecret: string; paymentIntentId: string } | null> {
+  const stripe = getStripe();
+  if (!stripe) return null;
+  const intent = await stripe.paymentIntents.create({
+    amount: args.amountCents,
+    currency: "usd",
+    receipt_email: args.sellerEmail,
+    description: `Promote: ${args.listingTitle.slice(0, 100)}`,
+    automatic_payment_methods: { enabled: true },
+    metadata: {
+      app: "listinglauncher",
+      type: "creator_booking",
+      bookingId: args.bookingId,
+      creatorId: args.creatorId,
+      sellerAccountId: args.sellerAccountId,
+    },
+  });
+  return { clientSecret: intent.client_secret ?? "", paymentIntentId: intent.id };
+}
+
+/**
+ * Release held funds to a creator's connected account, taking the platform fee.
+ */
+export async function releaseCreatorPayout(args: {
+  amountCents: number;
+  platformFeePercent: number;
+  connectedAccountId: string;
+  bookingId: string;
+  creatorId: string;
+}): Promise<{ transferId: string; feeCents: number; payoutCents: number } | null> {
+  const stripe = getStripe();
+  if (!stripe) return null;
+
+  const feeCents = Math.round((args.amountCents * args.platformFeePercent) / 100);
+  const payoutCents = args.amountCents - feeCents;
+
+  const transfer = await stripe.transfers.create({
+    amount: payoutCents,
+    currency: "usd",
+    destination: args.connectedAccountId,
+    description: `Booking ${args.bookingId} payout`,
+    metadata: {
+      app: "listinglauncher",
+      bookingId: args.bookingId,
+      creatorId: args.creatorId,
+    },
+  });
+
+  return { transferId: transfer.id, feeCents, payoutCents };
+}
+
+export async function refundBookingPayment(paymentIntentId: string): Promise<boolean> {
+  const stripe = getStripe();
+  if (!stripe) return false;
+  await stripe.refunds.create({ payment_intent: paymentIntentId });
+  return true;
 }

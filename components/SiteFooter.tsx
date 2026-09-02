@@ -5,7 +5,8 @@ const productLinks = [
   { href: "/generate", label: "Listing Generator" },
   { href: "/audit", label: "Listing Audit" },
   { href: "/bulk", label: "Bulk Generator" },
-  { href: "/influencers", label: "Creator Marketplace" },
+  { href: "/photo", label: "AI Photo Studio" },
+  { href: "/creators", label: "Creator Marketplace" },
   { href: "/library", label: "My Library" },
   { href: "/account", label: "My Account" },
 ];
@@ -14,6 +15,8 @@ const companyLinks = [
   { href: "/#features", label: "Features" },
   { href: "/#how-it-works", label: "How it works" },
   { href: "/#pricing", label: "Pricing" },
+  { href: "/affiliate", label: "Affiliate (30%)" },
+  { href: "/blog", label: "Blog" },
   { href: "/#faq", label: "FAQ" },
 ];
 
