@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { CreatorProfileView } from "@/components/CreatorProfileView";
 
+export const dynamic = "force-dynamic";
+
 export const metadata: Metadata = {
   title: "Creator Profile",
   description: "View a creator's profile, rates, reviews, and book them to promote your product.",

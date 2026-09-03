@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useAuth } from "@/components/AuthContext";
+import { ClaimCodeForm } from "@/components/ClaimCodeForm";
 
 const fieldClasses =
   "w-full rounded-xl border border-ink-200 bg-white px-4 py-3 text-sm text-ink-900 shadow-sm transition-all placeholder:text-ink-400 focus:border-brand-500 focus:outline-none focus:ring-4 focus:ring-brand-500/15";
@@ -98,6 +99,10 @@ export function AccountView() {
               </Link>
             </div>
           ) : null}
+
+          <div className="mt-6">
+            <ClaimCodeForm />
+          </div>
 
           <div className="mt-6 grid grid-cols-3 gap-3">
             <Link

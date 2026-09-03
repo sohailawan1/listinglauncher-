@@ -1,13 +1,21 @@
 /**
- * Image generation service using Replicate. Falls back to a clear error
- * message when REPLICATE_API_TOKEN is missing, so the rest of the app
- * continues to work.
+ * Image processing.
+ *
+ * Background removal runs IN-PROCESS using @imgly/background-removal-node —
+ * free, no API costs, no external service. Server downloads the model once
+ * and caches it on disk. Always free, no quota.
+ *
+ * Lifestyle scene generation uses Black Forest Labs FLUX 1.1 Pro via
+ * Replicate. Paid per image ($1 standard, $2 HD) — order paid through
+ * Stripe checkout before generation. Supports image-to-image so the
+ * customer's actual product appears in the generated scene.
  */
 
 const REPLICATE = "https://api.replicate.com/v1";
 
-const BG_REMOVAL_MODEL = "briaai/RMBG-1.4";
-const LIFESTYLE_MODEL = "stability-ai/sdxl:39ed52f2a78e934b3ba6e2a89f5b1c712de7dfea5355252556131aa4f31c63f2";
+/** FLUX 1.1 Pro — best photorealism available, supports image-to-image. */
+const FLUX_PRO_MODEL =
+  "black-forest-labs/flux-1.1-pro:80a09d66bfd0298ed64a04ecd6c80e2a2af7c6a96cfb65fa6a3c0a12269c45d5";
 
 type ReplicatePrediction = {
   id: string;
@@ -16,30 +24,87 @@ type ReplicatePrediction = {
   error?: string;
 };
 
-async function createPrediction(version: string, input: Record<string, unknown>): Promise<ReplicatePrediction> {
-  const token = process.env.REPLICATE_API_TOKEN;
-  if (!token) throw new Error("REPLICATE_API_TOKEN is not configured on the server.");
-
-  // The lifestyle model uses version:hash syntax; bg-removal uses owner/model with no version.
-  const url = version.includes(":")
-    ? `${REPLICATE}/predictions`
-    : `${REPLICATE}/predictions`;
-
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-    body: JSON.stringify(version.includes(":") ? { version, input } : { version: BG_REMOVAL_MODEL, input }),
-    cache: "no-store",
-  });
-  if (!res.ok) {
-    throw new Error(`Replicate ${res.status}: ${(await res.text()).slice(0, 200)}`);
-  }
-  return (await res.json()) as ReplicatePrediction;
+export function isReplicateConfigured(): boolean {
+  return Boolean(process.env.REPLICATE_API_TOKEN);
 }
 
-async function pollUntilDone(id: string, maxWaitMs = 90_000): Promise<ReplicatePrediction> {
+/* ============================ BACKGROUND REMOVAL ============================ */
+/**
+ * Free, unlimited, $0 cost. Runs locally on the server. Returns a data URL
+ * (image/png, base64) so the browser can display it without a CDN.
+ */
+export async function removeBackground(imageDataUrl: string): Promise<string> {
+  const mod = (await import("@imgly/background-removal-node")) as {
+    removeBackground(input: Blob | string): Promise<Blob>;
+  };
+  const inputBlob = await dataUrlToBlob(imageDataUrl);
+  const out = await mod.removeBackground(inputBlob);
+  return blobToDataUrl(out, "image/png");
+}
+
+/* ============================== LIFESTYLE (FLUX) ============================== */
+
+export type LifestyleResolution = "standard" | "hd";
+export type LifestyleMode = "text" | "image_to_image";
+
+export type LifestyleOptions = {
+  prompt: string;
+  resolution: LifestyleResolution;
+  productImageDataUrl?: string;
+};
+
+/** Standard = 1024x1024. HD = 1536x1536. (FLUX also supports 2048 but $0.12 is steep.) */
+function resolutionDims(r: LifestyleResolution): { width: number; height: number } {
+  return r === "hd" ? { width: 1536, height: 1536 } : { width: 1024, height: 1024 };
+}
+
+/**
+ * Generate a lifestyle product photo with FLUX 1.1 Pro. No watermark, no
+ * platform logo. If `productImageDataUrl` is provided, FLUX uses it as a
+ * reference (image-to-image) so the customer's actual product appears in
+ * the generated scene.
+ */
+export async function generateLifestyle(opts: LifestyleOptions): Promise<string> {
   const token = process.env.REPLICATE_API_TOKEN;
   if (!token) throw new Error("REPLICATE_API_TOKEN is not configured on the server.");
+
+  const dims = resolutionDims(opts.resolution);
+  const input: Record<string, unknown> = {
+    prompt: opts.prompt,
+    prompt_upsampling: true,
+    width: dims.width,
+    height: dims.height,
+    output_format: "jpg",
+    output_quality: 92,
+    safety_tolerance: 2,
+  };
+
+  if (opts.productImageDataUrl) {
+    // FLUX supports image-to-image with `image_prompt` (strength tunable).
+    input.image_prompt = opts.productImageDataUrl;
+    input.image_prompt_strength = 0.35; // stay faithful to the product
+    input.prompt_strength = 0.65; // let FLUX shape the scene
+  }
+
+  const res = await fetch(`${REPLICATE}/predictions`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ version: FLUX_PRO_MODEL, input }),
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(`Replicate ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  const initial = (await res.json()) as ReplicatePrediction;
+  const pred = await pollUntilDone(initial.id);
+  if (pred.status !== "succeeded") {
+    throw new Error(pred.error ?? `FLUX generation ${pred.status}`);
+  }
+  if (!pred.output) throw new Error("No output from FLUX");
+  const out = pred.output;
+  return Array.isArray(out) ? out[0] : out;
+}
+
+async function pollUntilDone(id: string, maxWaitMs = 120_000): Promise<ReplicatePrediction> {
+  const token = process.env.REPLICATE_API_TOKEN!;
   const start = Date.now();
   while (Date.now() - start < maxWaitMs) {
     const res = await fetch(`${REPLICATE}/predictions/${id}`, {
@@ -53,43 +118,26 @@ async function pollUntilDone(id: string, maxWaitMs = 90_000): Promise<ReplicateP
     }
     await new Promise((r) => setTimeout(r, 1500));
   }
-  throw new Error("Replicate prediction timed out");
+  throw new Error("FLUX prediction timed out");
 }
 
-export function isReplicateConfigured(): boolean {
-  return Boolean(process.env.REPLICATE_API_TOKEN);
-}
+/* =============================== UTILITIES =================================== */
 
-export async function removeBackground(imageDataUrl: string): Promise<string> {
-  const initial = await createPrediction(BG_REMOVAL_MODEL, { image: imageDataUrl });
-  const pred = initial.status === "starting" || initial.status === "processing"
-    ? await pollUntilDone(initial.id)
-    : initial;
-  if (pred.status === "failed" || pred.status === "canceled") {
-    throw new Error(pred.error ?? "Background removal failed");
+async function dataUrlToBlob(dataUrl: string): Promise<Blob> {
+  const m = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
+  if (!m) {
+    if (/^https?:\/\//.test(dataUrl)) {
+      const res = await fetch(dataUrl);
+      if (!res.ok) throw new Error("Could not fetch image");
+      return res.blob();
+    }
+    throw new Error("Unsupported image source");
   }
-  if (!pred.output) throw new Error("No output from background removal model");
-  const out = pred.output;
-  return Array.isArray(out) ? out[0] : out;
+  const buffer = Buffer.from(m[2], "base64");
+  return new Blob([buffer], { type: m[1] });
 }
 
-export async function generateLifestyle(prompt: string, negativePrompt?: string): Promise<string> {
-  const initial = await createPrediction(LIFESTYLE_MODEL, {
-    prompt,
-    negative_prompt: negativePrompt ?? "low quality, blurry, distorted, text, watermark",
-    width: 1024,
-    height: 1024,
-    num_outputs: 1,
-    guidance_scale: 7.5,
-    num_inference_steps: 30,
-  });
-  const pred = initial.status === "starting" || initial.status === "processing"
-    ? await pollUntilDone(initial.id)
-    : initial;
-  if (pred.status === "failed" || pred.status === "canceled") {
-    throw new Error(pred.error ?? "Lifestyle generation failed");
-  }
-  if (!pred.output) throw new Error("No output from lifestyle model");
-  const out = pred.output;
-  return Array.isArray(out) ? out[0] : out;
+async function blobToDataUrl(blob: Blob, mime: string): Promise<string> {
+  const buf = Buffer.from(await blob.arrayBuffer());
+  return `data:${mime};base64,${buf.toString("base64")}`;
 }

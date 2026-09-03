@@ -18,6 +18,7 @@ const companyLinks = [
   { href: "/affiliate", label: "Affiliate (30%)" },
   { href: "/blog", label: "Blog" },
   { href: "/#faq", label: "FAQ" },
+  { href: "/pitch", label: "Outreach Kit" },
 ];
 
 export function SiteFooter() {

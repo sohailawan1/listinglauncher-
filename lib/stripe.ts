@@ -183,3 +183,57 @@ export async function refundBookingPayment(paymentIntentId: string): Promise<boo
   await stripe.refunds.create({ payment_intent: paymentIntentId });
   return true;
 }
+
+/* ============================== LIFESTYLE CHECKOUT =========================== */
+
+/** Per-image pricing for AI lifestyle scenes. */
+export const LIFESTYLE_PRICES = {
+  standard: 100, // $1.00 USD in cents
+  hd: 200,      // $2.00 USD in cents
+} as const;
+
+export type LifestyleTier = keyof typeof LIFESTYLE_PRICES;
+
+/**
+ * Create a one-time Stripe Checkout Session for an AI lifestyle image.
+ * Returns a URL the browser redirects to. After payment, the user lands on
+ * /photo?paid=<sessionId> which the photo page picks up to run generation.
+ */
+export async function createLifestyleCheckoutSession(args: {
+  tier: LifestyleTier;
+  accountId: string;
+  prompt: string;
+  origin: string;
+}): Promise<{ url: string } | null> {
+  const stripe = getStripe();
+  if (!stripe) return null;
+
+  const amount = LIFESTYLE_PRICES[args.tier];
+  const session = await stripe.checkout.sessions.create({
+    mode: "payment",
+    line_items: [
+      {
+        price_data: {
+          currency: "usd",
+          product_data: {
+            name: `Lifestyle photo — ${args.tier === "hd" ? "HD (1536px)" : "Standard (1024px)"}`,
+            description: `FLUX 1.1 Pro · ${args.prompt.slice(0, 100)}`,
+          },
+          unit_amount: amount,
+        },
+        quantity: 1,
+      },
+    ],
+    success_url: `${args.origin}/photo?paid=1&tier=${args.tier}&session={CHECKOUT_SESSION_ID}`,
+    cancel_url: `${args.origin}/photo?cancelled=1`,
+    customer_email: undefined, // optionally pull from account
+    metadata: {
+      app: "listinglauncher",
+      type: "lifestyle",
+      tier: args.tier,
+      accountId: args.accountId,
+      prompt: args.prompt.slice(0, 500),
+    },
+  });
+  return session.url ? { url: session.url } : null;
+}

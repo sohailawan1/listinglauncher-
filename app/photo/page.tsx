@@ -1,10 +1,12 @@
 import type { Metadata } from "next";
 import { PhotoTool } from "@/components/PhotoTool";
 
+export const dynamic = "force-dynamic";
+
 export const metadata: Metadata = {
   title: "AI Photo Studio",
   description:
-    "Remove backgrounds and generate lifestyle product scenes with AI. Perfect for Etsy, Amazon, and Shopify listings.",
+    "Remove backgrounds and generate lifestyle product scenes with AI. Free background removal; lifestyle scenes powered by FLUX 1.1 Pro from $1.",
 };
 
 export default function PhotoPage() {

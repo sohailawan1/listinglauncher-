@@ -60,15 +60,19 @@ function createUpstashStore(url: string, token: string): UpstashStore {
 /* ------------------------- In-memory fallback -------------------------- */
 
 function createMemoryStore(): Store {
-  // Attach to globalThis so every module-instance (Next dev creates a
-  // separate instance per route) shares the same in-memory Map.
-  const g = globalThis as typeof globalThis & {
-    __llMemoryMap?: Map<string, string>;
-    __llMemoryExpirations?: Map<string, number>;
-  };
-  const map = g.__llMemoryMap ?? (g.__llMemoryMap = new Map<string, string>());
-  const expirations =
-    g.__llMemoryExpirations ?? (g.__llMemoryExpirations = new Map<string, number>());
+  return process.env.NODE_ENV === "production"
+    ? createEphemeralMemoryStore()
+    : createFileMemoryStore();
+}
+
+/**
+ * Ephemeral in-memory Map. Lost on every Next dev module reload — only used
+ * in production (where every lambda has its own memory anyway and Redis is the
+ * only sane option for shared state).
+ */
+function createEphemeralMemoryStore(): Store {
+  const map = new Map<string, string>();
+  const expirations = new Map<string, number>();
   return {
     async get(key) {
       return map.get(key) ?? null;
@@ -101,11 +105,98 @@ function createMemoryStore(): Store {
   };
 }
 
+/**
+ * File-backed in-memory store. Every route reads/writes the same JSON file
+ * on disk so session/usage data persists across Next dev module reloads.
+ * Use `ll:fs:reset` flag in the URL or delete the file to wipe.
+ */
+function createFileMemoryStore(): Store {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const fs = require("fs") as typeof import("fs");
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const path = require("path") as typeof import("path");
+  const CACHE_DIR = path.join(process.cwd(), ".next", "cache");
+  const FILE = path.join(CACHE_DIR, "ll-store.json");
+  try {
+    fs.mkdirSync(CACHE_DIR, { recursive: true });
+  } catch {
+    // ignore
+  }
+
+  type DB = { map: Record<string, string>; expirations: Record<string, number> };
+
+  function load(): DB {
+    try {
+      const raw = fs.readFileSync(FILE, "utf8");
+      return JSON.parse(raw) as DB;
+    } catch {
+      return { map: {}, expirations: {} };
+    }
+  }
+
+  function save(db: DB): void {
+    try {
+      fs.writeFileSync(FILE, JSON.stringify(db), "utf8");
+    } catch {
+      // disk full or read-only - ignore
+    }
+  }
+
+  return {
+    async get(key) {
+      const db = load();
+      const exp = db.expirations[key];
+      if (exp && exp < Date.now()) {
+        delete db.map[key];
+        delete db.expirations[key];
+        save(db);
+        return null;
+      }
+      return db.map[key] ?? null;
+    },
+    async set(key, value) {
+      const db = load();
+      db.map[key] = value;
+      save(db);
+    },
+    async del(key) {
+      const db = load();
+      delete db.map[key];
+      delete db.expirations[key];
+      save(db);
+    },
+    async incr(key) {
+      const db = load();
+      const next = Number(db.map[key] ?? 0) + 1;
+      db.map[key] = String(next);
+      save(db);
+      return next;
+    },
+    async expire(key, seconds) {
+      const db = load();
+      db.expirations[key] = Date.now() + seconds * 1000;
+      save(db);
+    },
+    async keys(pattern) {
+      const db = load();
+      const now = Date.now();
+      for (const k of Object.keys(db.expirations)) {
+        if (db.expirations[k] < now) {
+          delete db.map[k];
+          delete db.expirations[k];
+        }
+      }
+      const regex = new RegExp("^" + pattern.replace(/\*/g, ".*") + "$");
+      return Object.keys(db.map).filter((k) => regex.test(k));
+    },
+  };
+}
+
 /* ------------------------------ singleton ------------------------------- */
 
 export function getStore(): Store {
   // Pin the singleton to globalThis so it survives module reloads in Next dev.
-  const g = globalThis as typeof globalThis & { __llStoreInstance?: Store };
+  const g = globalThis as typeof globalThis & { __llStoreInstance?: Store; __llStoreWarned?: boolean };
   if (g.__llStoreInstance) return g.__llStoreInstance;
   const url = process.env.UPSTASH_REDIS_REST_URL;
   const token = process.env.UPSTASH_REDIS_REST_TOKEN;
@@ -113,7 +204,15 @@ export function getStore(): Store {
   if (url && token) {
     inst = createUpstashStore(url, token);
   } else {
-    console.warn("[store] UPSTASH_REDIS not configured - using in-memory store. Usage stats reset on restart; do not use in production.");
+    if (!g.__llStoreWarned) {
+      g.__llStoreWarned = true;
+      console.warn(
+        "[store] UPSTASH_REDIS not configured. " +
+          (process.env.NODE_ENV === "production"
+            ? "In production every serverless instance has its own memory — accounts and usage will be lost on every deploy. Set UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN (free at upstash.com)."
+            : "In dev: using file-backed store at .next/cache/ll-store.json so accounts and usage persist across Next dev module reloads.")
+      );
+    }
     inst = createMemoryStore();
   }
   g.__llStoreInstance = inst;
@@ -781,8 +880,64 @@ export async function listPhotoJobsForAccount(accountId: string): Promise<PhotoJ
 
 /* ============================== WAITLIST ================================== */
 
-export async function recordWaitlist(email: string): Promise<void> {
+export async function recordWaitlist(email: string, code: string): Promise<void> {
   const store = getStore();
-  await store.set(`waitlist:${email.toLowerCase()}`, new Date().toISOString());
+  await store.set(`waitlist:${email.toLowerCase()}`, JSON.stringify({ code, claimed: 0, createdAt: Date.now() }));
   await store.incr(`stats:waitlist:total`);
+}
+
+export async function getWaitlistRecord(email: string): Promise<{ code: string; claimed: number; createdAt: number } | null> {
+  const store = getStore();
+  const raw = await store.get(`waitlist:${email.toLowerCase()}`);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as { code: string; claimed: number; createdAt: number };
+  } catch {
+    return null;
+  }
+}
+
+export async function claimWaitlistCode(code: string, accountId: string): Promise<{ ok: boolean; error?: string }> {
+  const store = getStore();
+  // Reverse lookup: iterate waitlist:* (cheap; this is rare)
+  const keys = await store.keys("waitlist:*");
+  for (const key of keys) {
+    const raw = await store.get(key);
+    if (!raw) continue;
+    try {
+      const rec = JSON.parse(raw) as { code: string; claimed: number; createdAt: number };
+      if (rec.code === code) {
+        if (rec.claimed >= 1) {
+          return { ok: false, error: "This code was already claimed." };
+        }
+        // Grant 5 photo credits (each photo costs 2 listings, so 5 photos = 10
+        // listing-equivalents). We track this as a free bonus pool on the
+        // account, separate from the monthly plan allowance.
+        const existing = await getAccountById(accountId);
+        if (!existing) return { ok: false, error: "Account not found." };
+        rec.claimed += 1;
+        await store.set(key, JSON.stringify(rec));
+        // Add a "bonus credits" counter the API recognizes
+        const current = Number((await store.get(`credits:bonus:${accountId}`)) ?? 0);
+        await store.set(`credits:bonus:${accountId}`, String(current + 10));
+        return { ok: true };
+      }
+    } catch {
+      // skip
+    }
+  }
+  return { ok: false, error: "Code not found." };
+}
+
+export async function getBonusCredits(accountId: string): Promise<number> {
+  const v = await getStore().get(`credits:bonus:${accountId}`);
+  return Number(v ?? 0);
+}
+
+export async function consumeBonusCredit(accountId: string): Promise<boolean> {
+  const store = getStore();
+  const current = Number((await store.get(`credits:bonus:${accountId}`)) ?? 0);
+  if (current <= 0) return false;
+  await store.set(`credits:bonus:${accountId}`, String(current - 1));
+  return true;
 }
